@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fintrack",
+  "account_id": "6ad0888a2ee7ec203e961493dd19193e",
+  "main": "server/index.ts",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "dist",
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fintrack-db",
+      // 執行 `npx wrangler d1 create fintrack-db` 後,把回傳的 database_id 填到下面
+      "database_id": "REPLACE_WITH_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    // 每小時整點更新匯率快取
+    "crons": ["0 * * * *"]
+  },
+  "vars": {
+    // 首位使用者註冊完成後,可改為 "false" 再部署一次,關閉註冊
+    "ALLOW_REGISTRATION": "true"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
