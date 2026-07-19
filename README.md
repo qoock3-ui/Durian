@@ -1,19 +1,30 @@
-# :earth_americas: GDP dashboard template
+# 💎 FinTrack — 跨國資產管理系統
 
-A simple Streamlit app showing the GDP of different countries in the world.
+個人跨國(台灣/越南/美國/其他)資產、收入、支出管理系統,
+所有外幣依即時匯率換算成 TWD 呈現總覽與趨勢。
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://gdp-dashboard-template.streamlit.app/)
+| 文件 | 內容 |
+|---|---|
+| [SPEC.md](SPEC.md) | 功能規格書 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 系統架構規劃 |
+| [DEPLOY.md](DEPLOY.md) | Cloudflare 部署步驟 |
 
-### How to run it on your own machine
+## 技術棧
 
-1. Install the requirements
+- **前端**:React 19 + Vite + Tailwind CSS v4 + Recharts(SPA)
+- **API**:Cloudflare Worker + Hono
+- **資料庫**:Cloudflare D1(SQLite)
+- **匯率**:Cron Trigger 每小時抓 open.er-api.com,快取於 D1
+- **認證**:Email/Password(PBKDF2)+ JWT
+- **部署**:單一 Worker(Static Assets + API 同一部署單元)
 
-   ```
-   $ pip install -r requirements.txt
-   ```
+## 快速開始
 
-2. Run the app
+```bash
+npm install
+npm run db:migrate:local
+npx wrangler dev     # 終端 1:API(http://localhost:8787)
+npm run dev          # 終端 2:前端(http://localhost:5173)
+```
 
-   ```
-   $ streamlit run streamlit_app.py
-   ```
+部署到 Cloudflare 見 [DEPLOY.md](DEPLOY.md)。
