@@ -23,8 +23,8 @@
     "crons": ["0 * * * *"]
   },
   "vars": {
-    // 首位使用者註冊完成後,可改為 "false" 再部署一次,關閉註冊
-    "ALLOW_REGISTRATION": "true"
+    // 已關閉註冊(帳號已建立)。若需重新開放,改回 "true" 再部署
+    "ALLOW_REGISTRATION": "false"
   },
   "observability": {
     "enabled": true
