@@ -2,31 +2,30 @@
 
 目標帳戶:`6ad0888a2ee7ec203e961493dd19193e`(已寫入 `wrangler.jsonc` 的 `account_id`)。
 
-## 一、首次部署(約 5 分鐘)
+> **目前進度**:D1 資料庫 `fintrack-db`(id `8dc509fc-f072-4526-b4a3-391de733fcd7`)
+> 已建立、migration 已套用、種子匯率已寫入,`wrangler.jsonc` 已填好 id。
+> **只剩部署 Worker 這一步**,走下面任一條路即可。
 
-在本機(或任何裝有 Node 22+ 的環境)執行:
+## 路線 A:手機/瀏覽器(GitHub Actions 自動部署)
+
+1. **建立 Cloudflare API Token**:
+   [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+   → Create Token → 套用範本 **Edit Cloudflare Workers** → 權限再加一列 **Account / D1 / Edit** → 建立並複製 token。
+2. **加到 GitHub Secrets**:repo → Settings → Secrets and variables → Actions →
+   - `CLOUDFLARE_API_TOKEN`:剛複製的 token(必填)
+   - `JWT_SECRET`:一串隨機長字串(建議設定;沒設會用開發用預設值,安全性較低)
+3. **把分支合併進 `main`**:push 到 main 就會自動建置 + 部署(`.github/workflows/deploy.yml`)。
+
+## 路線 B:本機電腦(wrangler CLI)
 
 ```bash
 npm install
-
-# 1. 登入 Cloudflare(瀏覽器 OAuth)
 npx wrangler login
-
-# 2. 建立 D1 資料庫
-npx wrangler d1 create fintrack-db
-#    → 把輸出的 database_id 貼到 wrangler.jsonc 裡取代 REPLACE_WITH_DATABASE_ID
-
-# 3. 建表(套用 migrations/)
-npm run db:migrate
-
-# 4. 設定 JWT 密鑰(輸入一串隨機長字串,例如 `openssl rand -base64 32` 的輸出)
-npx wrangler secret put JWT_SECRET
-
-# 5. 建置前端並部署
+npx wrangler secret put JWT_SECRET   # 輸入一串隨機長字串
 npm run deploy
 ```
 
-部署完成後 wrangler 會顯示網址(`https://fintrack.<你的子網域>.workers.dev`)。
+部署完成後會顯示網址(`https://fintrack.<你的子網域>.workers.dev`)。
 開啟後先「註冊」建立你的帳號。
 
 ## 二、註冊完成後建議關閉註冊

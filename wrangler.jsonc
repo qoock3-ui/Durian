@@ -14,8 +14,7 @@
     {
       "binding": "DB",
       "database_name": "fintrack-db",
-      // 執行 `npx wrangler d1 create fintrack-db` 後,把回傳的 database_id 填到下面
-      "database_id": "REPLACE_WITH_DATABASE_ID",
+      "database_id": "8dc509fc-f072-4526-b4a3-391de733fcd7",
       "migrations_dir": "migrations"
     }
   ],
