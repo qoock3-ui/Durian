@@ -3,11 +3,11 @@ import type { Region } from "../lib/constants";
 import { REGION_COLOR, REGION_FLAG, REGION_LABEL } from "../lib/constants";
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-2xl bg-white p-5 shadow-sm ${className}`}>{children}</div>;
+  return <div className={`rounded-2xl bg-white p-6 shadow-sm md:p-5 ${className}`}>{children}</div>;
 }
 
 export function CardTitle({ children }: { children: ReactNode }) {
-  return <h2 className="mb-4 text-base font-semibold text-slate-700">{children}</h2>;
+  return <h2 className="mb-4 text-lg font-semibold text-slate-700 md:text-base">{children}</h2>;
 }
 
 export function PrimaryButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {

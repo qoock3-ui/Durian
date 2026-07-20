@@ -39,8 +39,8 @@ export default function Incomes() {
           return (
             <Card key={cur}>
               <p className="text-sm text-slate-500">月均收入({cur})</p>
-              <p className="mt-1 text-xl font-bold text-emerald-600">{fmt(monthly, cur)}</p>
-              <p className="text-xs text-slate-400">年約 {fmt(monthly * 12, cur)}</p>
+              <p className="mt-2 text-3xl font-bold text-emerald-600 md:mt-1 md:text-xl">{fmt(monthly, cur)}</p>
+              <p className="mt-1 text-xs text-slate-400 md:mt-0">年約 {fmt(monthly * 12, cur)}</p>
             </Card>
           );
         })}
@@ -69,7 +69,7 @@ export default function Incomes() {
                       {i.note && <div className="text-xs text-slate-400">{i.note}</div>}
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold">{fmt(i.amount, i.currency)}</div>
+                      <div className="text-lg font-semibold md:text-base">{fmt(i.amount, i.currency)}</div>
                       {i.frequency === "yearly" && (
                         <div className="text-xs text-slate-400">月均 {fmt(i.amount / 12, i.currency)}</div>
                       )}
