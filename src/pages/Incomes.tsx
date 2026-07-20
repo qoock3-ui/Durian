@@ -28,7 +28,7 @@ export default function Incomes() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">收入</h1>
         <PrimaryButton onClick={() => setEditing("new")}>+ 新增收入</PrimaryButton>
       </div>
