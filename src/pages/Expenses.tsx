@@ -41,7 +41,7 @@ export function ExpenseList({
             </div>
           </div>
           <div className="text-right">
-            <div className="font-semibold">{fmt(e.amount, e.currency)}</div>
+            <div className="text-lg font-semibold md:text-base">{fmt(e.amount, e.currency)}</div>
             {e.currency !== "TWD" && (
               <div className="text-xs text-slate-400">≈ {fmtTWD(toTWD(e.amount, e.currency, rates))}</div>
             )}
@@ -86,9 +86,9 @@ export default function Expenses() {
       </div>
 
       <div className="flex items-center justify-center gap-4">
-        <button onClick={() => setMonth(shiftMonth(month, -1))} className="rounded-lg px-3 py-1 text-lg hover:bg-slate-200">‹</button>
-        <span className="text-lg font-semibold">{y}年{Number(m)}月</span>
-        <button onClick={() => setMonth(shiftMonth(month, 1))} className="rounded-lg px-3 py-1 text-lg hover:bg-slate-200">›</button>
+        <button onClick={() => setMonth(shiftMonth(month, -1))} className="rounded-lg px-3 py-1 text-xl hover:bg-slate-200 md:text-lg">‹</button>
+        <span className="text-xl font-semibold md:text-lg">{y}年{Number(m)}月</span>
+        <button onClick={() => setMonth(shiftMonth(month, 1))} className="rounded-lg px-3 py-1 text-xl hover:bg-slate-200 md:text-lg">›</button>
       </div>
 
       <RegionTabs regions={["ALL", "TW", "VN", "OTHER"]} value={tab} onChange={setTab} />

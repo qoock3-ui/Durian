@@ -40,15 +40,15 @@ export default function Assets() {
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <p className="text-sm text-slate-500">🇹🇼 台灣資產(TWD)</p>
-          <p className="mt-1 text-xl font-bold text-blue-700">{fmt(twSum, "TWD")}</p>
+          <p className="mt-2 text-3xl font-bold text-blue-700 md:mt-1 md:text-xl">{fmt(twSum, "TWD")}</p>
         </Card>
         <Card>
           <p className="text-sm text-slate-500">🇻🇳 越南資產(VND)</p>
-          <p className="mt-1 text-xl font-bold text-red-700">{fmt(vnSum, "VND")}</p>
+          <p className="mt-2 text-3xl font-bold text-red-700 md:mt-1 md:text-xl">{fmt(vnSum, "VND")}</p>
         </Card>
         <Card>
           <p className="text-sm text-slate-500">💳 負債總計</p>
-          <p className="mt-1 text-xl font-bold text-slate-700">{fmtTWD(liabilitySum)}</p>
+          <p className="mt-2 text-3xl font-bold text-slate-700 md:mt-1 md:text-xl">{fmtTWD(liabilitySum)}</p>
         </Card>
       </div>
 
@@ -83,7 +83,7 @@ export default function Assets() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold">{fmt(a.amount, a.currency)}</div>
+                      <div className="text-lg font-semibold md:text-base">{fmt(a.amount, a.currency)}</div>
                       {a.currency !== "TWD" && (
                         <div className="text-xs text-slate-400">≈ {fmtTWD(toTWD(a.amount, a.currency, rates.rates))}</div>
                       )}

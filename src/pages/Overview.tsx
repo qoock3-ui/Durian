@@ -105,7 +105,7 @@ export default function Overview() {
 
       <Card className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white">
         <p className="text-sm text-blue-100">總淨資產(TWD)</p>
-        <p className="mt-1 text-4xl font-bold">{fmtTWD(netWorth)}</p>
+        <p className="mt-1 text-5xl font-bold md:text-4xl">{fmtTWD(netWorth)}</p>
         <p className="mt-2 text-xs text-blue-200">=(現金 + 投資 + 不動產 + 勞退)−(負債 + 保險)</p>
       </Card>
 
@@ -120,8 +120,8 @@ export default function Overview() {
                 <span className="font-medium">{REGION_FLAG[region]} {REGION_LABEL[region]}</span>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{currency}</span>
               </div>
-              <p className="mt-2 text-xl font-bold">{fmt(local, currency)}</p>
-              <p className="text-xs text-slate-400">≈ {fmtTWD(twd)} · 共 {regionAssets.length} 筆</p>
+              <p className="mt-3 text-3xl font-bold md:mt-2 md:text-xl">{fmt(local, currency)}</p>
+              <p className="mt-1 text-xs text-slate-400 md:mt-0">≈ {fmtTWD(twd)} · 共 {regionAssets.length} 筆</p>
             </Card>
           );
         })}
@@ -131,18 +131,18 @@ export default function Overview() {
         <Card className="bg-gradient-to-br from-emerald-500 to-green-600 text-white">
           <p className="text-sm text-emerald-100">月均收入狀況</p>
           <div className="mt-2 space-y-1 text-sm">
-            <div className="flex justify-between"><span>TWD 月均</span><span className="font-semibold">{fmt(incomeByCur("TWD"), "TWD")}</span></div>
-            <div className="flex justify-between"><span>VND 月均</span><span className="font-semibold">{fmt(incomeByCur("VND"), "VND")}</span></div>
+            <div className="flex justify-between"><span>TWD 月均</span><span className="text-base font-semibold md:text-sm">{fmt(incomeByCur("TWD"), "TWD")}</span></div>
+            <div className="flex justify-between"><span>VND 月均</span><span className="text-base font-semibold md:text-sm">{fmt(incomeByCur("VND"), "VND")}</span></div>
           </div>
-          <p className="mt-3 border-t border-white/20 pt-2 text-lg font-bold">合計 {fmtTWD(monthlyIncome)}</p>
+          <p className="mt-3 border-t border-white/20 pt-2 text-2xl font-bold md:text-lg">合計 {fmtTWD(monthlyIncome)}</p>
         </Card>
         <Card className="bg-gradient-to-br from-orange-500 to-red-500 text-white">
           <p className="text-sm text-orange-100">本月支出狀況</p>
           <div className="mt-2 space-y-1 text-sm">
-            <div className="flex justify-between"><span>TWD 本月</span><span className="font-semibold">{fmt(expenseByCur("TWD"), "TWD")}</span></div>
-            <div className="flex justify-between"><span>VND 本月</span><span className="font-semibold">{fmt(expenseByCur("VND"), "VND")}</span></div>
+            <div className="flex justify-between"><span>TWD 本月</span><span className="text-base font-semibold md:text-sm">{fmt(expenseByCur("TWD"), "TWD")}</span></div>
+            <div className="flex justify-between"><span>VND 本月</span><span className="text-base font-semibold md:text-sm">{fmt(expenseByCur("VND"), "VND")}</span></div>
           </div>
-          <p className="mt-3 border-t border-white/20 pt-2 text-lg font-bold">合計 {fmtTWD(thisMonthTotal)}</p>
+          <p className="mt-3 border-t border-white/20 pt-2 text-2xl font-bold md:text-lg">合計 {fmtTWD(thisMonthTotal)}</p>
         </Card>
       </div>
 
