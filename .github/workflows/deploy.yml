@@ -35,3 +35,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      - name: Set Resend API key (if configured)
+        run: |
+          if [ -n "$RESEND_API_KEY" ]; then
+            echo "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY
+          else
+            echo "RESEND_API_KEY repo secret not set; skipping (forgot-password email will fail silently)"
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}

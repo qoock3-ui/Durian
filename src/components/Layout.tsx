@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useStore } from "../store";
+import ChangePasswordModal from "./ChangePasswordModal";
 
 const NAV = [
   { to: "/", label: "總覽", icon: "📊" },
@@ -12,6 +14,7 @@ const NAV = [
 export default function Layout() {
   const { user, logout } = useStore();
   const initial = user?.name?.[0]?.toUpperCase() ?? "?";
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   return (
     <div className="min-h-screen md:flex">
@@ -48,8 +51,14 @@ export default function Layout() {
             </div>
           </div>
           <button
-            onClick={logout}
+            onClick={() => setShowChangePassword(true)}
             className="mt-3 w-full rounded-lg bg-white/10 py-1.5 text-xs hover:bg-white/20"
+          >
+            修改密碼
+          </button>
+          <button
+            onClick={logout}
+            className="mt-2 w-full rounded-lg bg-white/10 py-1.5 text-xs hover:bg-white/20"
           >
             登出
           </button>
@@ -63,6 +72,12 @@ export default function Layout() {
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-active text-xs font-bold">
             {initial}
           </div>
+          <button
+            onClick={() => setShowChangePassword(true)}
+            className="rounded-lg bg-white/10 px-2.5 py-1.5 text-xs hover:bg-white/20"
+          >
+            修改密碼
+          </button>
           <button
             onClick={logout}
             className="rounded-lg bg-white/10 px-2.5 py-1.5 text-xs hover:bg-white/20"
@@ -107,6 +122,8 @@ export default function Layout() {
           </NavLink>
         ))}
       </nav>
+
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
     </div>
   );
 }

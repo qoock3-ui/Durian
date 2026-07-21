@@ -24,7 +24,8 @@
   },
   "vars": {
     // 已關閉註冊(帳號已建立)。若需重新開放,改回 "true" 再部署
-    "ALLOW_REGISTRATION": "false"
+    "ALLOW_REGISTRATION": "false",
+    "MAIL_FROM": "onboarding@resend.dev"
   },
   "observability": {
     "enabled": true
