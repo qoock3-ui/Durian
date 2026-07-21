@@ -1,6 +1,17 @@
 import { Hono } from "hono";
 import type { AppContext, Env } from "./env";
 import type { MiddlewareHandler } from "hono";
+import { sendResetEmail } from "./email";
+
+const TEMP_PASSWORD_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const RESET_TTL_MS = 30 * 60 * 1000;
+
+function generateTempPassword(length = 12): string {
+  const bytes = crypto.getRandomValues(new Uint32Array(length));
+  let out = "";
+  for (let i = 0; i < length; i++) out += TEMP_PASSWORD_CHARS[bytes[i] % TEMP_PASSWORD_CHARS.length];
+  return out;
+}
 
 const enc = new TextEncoder();
 const PBKDF2_ITERATIONS = 100_000;
@@ -120,12 +131,85 @@ authRoutes.post("/register", async (c) => {
 authRoutes.post("/login", async (c) => {
   const body = await c.req.json<{ email?: string; password?: string }>();
   const email = body.email?.trim().toLowerCase() ?? "";
-  const user = await c.env.DB.prepare("SELECT id, email, name, password_hash FROM users WHERE email = ?")
+  const password = body.password ?? "";
+  const user = await c.env.DB.prepare(
+    "SELECT id, email, name, password_hash, reset_hash, reset_expires FROM users WHERE email = ?",
+  )
     .bind(email)
-    .first<{ id: number; email: string; name: string; password_hash: string }>();
-  if (!user || !(await verifyPassword(body.password ?? "", user.password_hash))) {
-    return c.json({ error: "帳號或密碼錯誤" }, 401);
+    .first<{
+      id: number;
+      email: string;
+      name: string;
+      password_hash: string;
+      reset_hash: string | null;
+      reset_expires: string | null;
+    }>();
+  if (!user) return c.json({ error: "帳號或密碼錯誤" }, 401);
+
+  let authenticated = await verifyPassword(password, user.password_hash);
+  if (
+    !authenticated &&
+    user.reset_hash &&
+    user.reset_expires &&
+    new Date(user.reset_expires).getTime() > Date.now()
+  ) {
+    authenticated = await verifyPassword(password, user.reset_hash);
   }
+  if (!authenticated) return c.json({ error: "帳號或密碼錯誤" }, 401);
+
   const token = await signJwt(user.id, c.env);
   return c.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+});
+
+authRoutes.post("/change-password", requireAuth, async (c) => {
+  const body = await c.req.json<{ currentPassword?: string; newPassword?: string }>();
+  const currentPassword = body.currentPassword ?? "";
+  const newPassword = body.newPassword ?? "";
+  if (newPassword.length < 8) {
+    return c.json({ error: "新密碼至少 8 碼" }, 400);
+  }
+  const userId = c.get("userId");
+  const user = await c.env.DB.prepare("SELECT password_hash FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ password_hash: string }>();
+  if (!user || !(await verifyPassword(currentPassword, user.password_hash))) {
+    return c.json({ error: "目前密碼錯誤" }, 401);
+  }
+  const newHash = await hashPassword(newPassword);
+  await c.env.DB.prepare(
+    "UPDATE users SET password_hash = ?, reset_hash = NULL, reset_expires = NULL WHERE id = ?",
+  )
+    .bind(newHash, userId)
+    .run();
+  return c.json({ ok: true });
+});
+
+authRoutes.post("/forgot-password", async (c) => {
+  const body = await c.req.json<{ email?: string }>();
+  const email = body.email?.trim().toLowerCase() ?? "";
+  if (!email) return c.json({ ok: true });
+
+  const user = await c.env.DB.prepare("SELECT id, email, reset_expires FROM users WHERE email = ?")
+    .bind(email)
+    .first<{ id: number; email: string; reset_expires: string | null }>();
+
+  if (user) {
+    const now = Date.now();
+    const recentlyIssued = user.reset_expires && new Date(user.reset_expires).getTime() - now > 28 * 60 * 1000;
+    if (!recentlyIssued) {
+      try {
+        const tempPassword = generateTempPassword();
+        const resetHash = await hashPassword(tempPassword);
+        const resetExpires = new Date(now + RESET_TTL_MS).toISOString();
+        await c.env.DB.prepare("UPDATE users SET reset_hash = ?, reset_expires = ? WHERE id = ?")
+          .bind(resetHash, resetExpires, user.id)
+          .run();
+        await sendResetEmail(c.env, user.email, tempPassword);
+      } catch (err) {
+        console.log("forgot-password email failed:", err);
+      }
+    }
+  }
+
+  return c.json({ ok: true });
 });
