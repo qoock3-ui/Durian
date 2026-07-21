@@ -3,7 +3,7 @@ export type Env = {
   ASSETS: Fetcher;
   JWT_SECRET?: string;
   ALLOW_REGISTRATION?: string;
-  RESEND_API_KEY?: string;
+  BREVO_API_KEY?: string;
   MAIL_FROM?: string;
 };
 
