@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import Mascot from "./components/Mascot";
 import Login from "./pages/Login";
 import Overview from "./pages/Overview";
 import Assets from "./pages/Assets";
@@ -13,7 +14,12 @@ export default function App() {
   const { user, loading } = useStore();
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center text-slate-400">載入中…</div>;
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-paper text-ink-3">
+        <Mascot size={64} />
+        <p className="text-sm">載入中…</p>
+      </div>
+    );
   }
   if (!user && !getToken()) {
     return <Login />;

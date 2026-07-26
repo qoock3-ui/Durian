@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { GhostButton, ModalShell, PrimaryButton, inputClass } from "./ui";
 
 export type Field = {
   name: string;
@@ -49,9 +50,6 @@ export default function FormModal({
     }
   };
 
-  const inputClass =
-    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none";
-
   const renderField = (f: Field): ReactNode => {
     if (f.type === "select") {
       return (
@@ -86,37 +84,25 @@ export default function FormModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="mb-4 text-lg font-semibold">{title}</h3>
-        <div className="space-y-3">
-          {fields.map((f) => (
-            <label key={f.name} className="block">
-              <span className="mb-1 block text-sm font-medium text-slate-600">
-                {f.label}
-                {f.required && <span className="text-red-500"> *</span>}
-              </span>
-              {renderField(f)}
-            </label>
-          ))}
-        </div>
-        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">
-            取消
-          </button>
-          <button
-            onClick={submit}
-            disabled={busy}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {busy ? "儲存中…" : "儲存"}
-          </button>
-        </div>
+    <ModalShell title={title} onClose={onClose}>
+      <div className="space-y-3">
+        {fields.map((f) => (
+          <label key={f.name} className="block">
+            <span className="mb-1 block text-sm font-medium text-ink-2">
+              {f.label}
+              {f.required && <span className="text-danger"> *</span>}
+            </span>
+            {renderField(f)}
+          </label>
+        ))}
       </div>
-    </div>
+      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+      <div className="mt-5 flex justify-end gap-2">
+        <GhostButton onClick={onClose}>取消</GhostButton>
+        <PrimaryButton onClick={submit} disabled={busy}>
+          {busy ? "儲存中…" : "儲存"}
+        </PrimaryButton>
+      </div>
+    </ModalShell>
   );
 }

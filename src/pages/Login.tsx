@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { post } from "../api";
 import { useStore } from "../store";
+import Mascot from "../components/Mascot";
+import { inputClass } from "../components/ui";
 import type { User } from "../lib/constants";
 
 export default function Login() {
@@ -43,14 +45,19 @@ export default function Login() {
     }
   };
 
-  const inputClass =
-    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none";
+  const bigButton =
+    "w-full rounded-full border-2 border-ink bg-mango py-2.5 font-round text-sm font-bold text-ink transition hover:bg-mango-d disabled:opacity-50";
+  const linkButton =
+    "mt-4 w-full text-center text-sm text-ink-2 underline-offset-2 hover:text-ink hover:underline";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-lg">
-        <h1 className="mb-1 text-center text-2xl font-bold text-slate-800">💎 FinTrack</h1>
-        <p className="mb-6 text-center text-sm text-slate-500">跨國資產管理系統</p>
+    <div className="flex min-h-screen items-center justify-center bg-paper p-4">
+      <div className="w-full max-w-sm rounded-card border-2 border-ink bg-card p-7">
+        <div className="mb-5 flex flex-col items-center gap-2">
+          <Mascot size={76} mood={mode === "forgot" ? "sleepy" : "happy"} />
+          <h1 className="font-round text-2xl font-bold">FinTrack</h1>
+          <p className="text-sm text-ink-3">跨國資產管理系統</p>
+        </div>
 
         {mode === "forgot" ? (
           <>
@@ -63,13 +70,9 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              {forgotMessage && <p className="text-sm text-green-600">{forgotMessage}</p>}
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
+              {error && <p className="text-sm text-danger">{error}</p>}
+              {forgotMessage && <p className="text-sm text-income">{forgotMessage}</p>}
+              <button type="submit" disabled={busy} className={bigButton}>
                 {busy ? "處理中…" : "寄送臨時密碼"}
               </button>
             </form>
@@ -79,7 +82,7 @@ export default function Login() {
                 setError("");
                 setForgotMessage("");
               }}
-              className="mt-4 w-full text-center text-sm text-blue-600 hover:underline"
+              className={linkButton}
             >
               返回登入
             </button>
@@ -87,11 +90,33 @@ export default function Login() {
         ) : (
           <>
             <form onSubmit={submit} className="space-y-3">
-              <input className={inputClass} type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <input
+                className={inputClass}
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
               {mode === "register" && (
-                <input className={inputClass} type="text" placeholder="顯示名稱" value={name} onChange={(e) => setName(e.target.value)} required />
+                <input
+                  className={inputClass}
+                  type="text"
+                  placeholder="顯示名稱"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
               )}
-              <input className={inputClass} type="password" placeholder="密碼(至少 8 碼)" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
+              <input
+                className={inputClass}
+                type="password"
+                placeholder="密碼(至少 8 碼)"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+              />
               {mode === "login" && (
                 <button
                   type="button"
@@ -100,17 +125,13 @@ export default function Login() {
                     setError("");
                     setForgotMessage("");
                   }}
-                  className="block w-full text-right text-xs text-blue-600 hover:underline"
+                  className="block w-full text-right text-xs text-ink-3 underline-offset-2 hover:text-ink hover:underline"
                 >
                   忘記密碼?
                 </button>
               )}
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
+              {error && <p className="text-sm text-danger">{error}</p>}
+              <button type="submit" disabled={busy} className={bigButton}>
                 {busy ? "處理中…" : mode === "login" ? "登入" : "註冊"}
               </button>
             </form>
@@ -119,7 +140,7 @@ export default function Login() {
                 setMode(mode === "login" ? "register" : "login");
                 setError("");
               }}
-              className="mt-4 w-full text-center text-sm text-blue-600 hover:underline"
+              className={linkButton}
             >
               {mode === "login" ? "還沒有帳號?註冊" : "已有帳號?登入"}
             </button>
