@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { useStore } from "../store";
 import { Card, CardTitle, MonthNav } from "../components/ui";
@@ -26,6 +26,28 @@ const TOOLTIP = {
   },
   cursor: { fill: "rgba(46,39,51,0.06)", stroke: "#2e2733", strokeDasharray: "3 3" },
 };
+
+/**
+ * 圖例畫在圖表容器外面。
+ * recharts 內建的 Legend 佔用繪圖區高度,八個分類在手機上會換到三行、
+ * 把長條圖擠扁還跟 X 軸標籤打架。拉出來自己排就沒有這個問題,
+ * 順便套上全站的粗描邊圓點語彙。
+ */
+function ChartLegend({ items }: { items: { label: string; color: string }[] }) {
+  return (
+    <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5">
+      {items.map((i) => (
+        <span key={i.label} className="flex items-center gap-1.5 text-xs text-ink-2">
+          <span
+            className="h-3 w-3 shrink-0 rounded-full border-2 border-ink"
+            style={{ backgroundColor: i.color }}
+          />
+          {i.label}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export default function Trends() {
   const { incomes, expenses, rates } = useStore();
@@ -82,12 +104,17 @@ export default function Trends() {
               <XAxis dataKey="label" fontSize={12} />
               <YAxis fontSize={12} tickFormatter={axisFmt} />
               <Tooltip formatter={(v) => fmtTWD(Number(v))} {...TOOLTIP} />
-              <Legend />
               <Line type="monotone" dataKey="收入" stroke="#4fb58b" strokeWidth={2.5} dot={false} />
               <Line type="monotone" dataKey="支出" stroke="#f0803c" strokeWidth={2.5} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
+        <ChartLegend
+          items={[
+            { label: "收入", color: "#4fb58b" },
+            { label: "支出", color: "#f0803c" },
+          ]}
+        />
         <p className="mt-2 text-xs text-ink-3">
           收入取自「收入」頁的月均設定值,不是實際入帳流水,所以是一條固定線。
         </p>
@@ -102,13 +129,13 @@ export default function Trends() {
               <XAxis dataKey="label" fontSize={12} />
               <YAxis fontSize={12} tickFormatter={axisFmt} />
               <Tooltip formatter={(v) => fmtTWD(Number(v))} {...TOOLTIP} />
-              <Legend />
               {EXPENSE_CATEGORIES.map((c) => (
                 <Bar key={c.value} dataKey={c.label} stackId="spend" fill={c.color} />
               ))}
             </BarChart>
           </ResponsiveContainer>
         </div>
+        <ChartLegend items={EXPENSE_CATEGORIES.map((c) => ({ label: c.label, color: c.color }))} />
       </Card>
 
       <Card>
