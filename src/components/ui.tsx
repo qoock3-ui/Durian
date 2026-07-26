@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import type { Region } from "../lib/constants";
 import { REGION_COLOR, REGION_FLAG, REGION_LABEL } from "../lib/constants";
 import Mascot from "./Mascot";
@@ -110,7 +110,9 @@ export function RegionBadge({ region }: { region: Region }) {
 
 export function Badge({ children, className = "bg-p-stone" }: { children: ReactNode; className?: string }) {
   return (
-    <span className={`inline-flex rounded-full border-2 border-ink px-2 py-0.5 text-xs font-medium ${className}`}>
+    <span
+      className={`inline-flex shrink-0 whitespace-nowrap rounded-full border-2 border-ink px-2 py-0.5 text-xs font-medium ${className}`}
+    >
       {children}
     </span>
   );
@@ -174,6 +176,25 @@ export function EmptyState({ text, action }: { text: string; action?: ReactNode 
       <Mascot size={72} mood="sleepy" />
       <p className="text-sm">{text}</p>
       {action}
+    </div>
+  );
+}
+
+/** 存檔回饋。自動消失,不擋操作。 */
+export function Toast({ text, onDone }: { text: string; onDone: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 3200);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  return (
+    <div
+      role="status"
+      className="pointer-events-none fixed inset-x-0 bottom-24 z-40 flex justify-center px-4 md:bottom-8"
+    >
+      <div className="flex items-center gap-2 rounded-full border-2 border-ink bg-p-mint px-4 py-2 text-sm font-medium">
+        <Mascot size={24} mood="cheer" />
+        {text}
+      </div>
     </div>
   );
 }

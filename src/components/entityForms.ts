@@ -13,27 +13,38 @@ const currencyField: Field = {
 };
 const noteField: Field = { name: "note", label: "備註", type: "textarea" };
 
-/** 分類是動態的,表單欄位得跟著使用者當下的分類表產生 */
-const categoryField = (cats: CategoryIndex, kind: "asset" | "income", label: string, name: string): Field => ({
+/**
+ * 分類是動態的,表單欄位得跟著使用者當下的分類表產生。
+ * onAdd 會在標籤旁多出一個「＋ 新增分類」入口,讓人不必先跑一趟分類管理。
+ */
+const categoryField = (
+  cats: CategoryIndex,
+  kind: "asset" | "income",
+  label: string,
+  name: string,
+  onAdd?: () => void,
+): Field => ({
   name,
   label,
   type: "select",
   required: true,
+  onAdd,
+  addLabel: "＋ 新增分類",
   groups: cats.groups(kind).map((g) => ({
     group: g.group,
     items: g.items.map((c) => ({ value: c.key, label: `${c.icon} ${c.label}` })),
   })),
 });
 
-export const assetFields = (cats: CategoryIndex): Field[] => [
+export const assetFields = (cats: CategoryIndex, onAddCategory?: () => void): Field[] => [
   { name: "name", label: "資產名稱", type: "text", required: true },
-  categoryField(cats, "asset", "類別", "category"),
+  categoryField(cats, "asset", "類別", "category", onAddCategory),
   regionField, amountField, currencyField, noteField,
 ];
 
-export const incomeFields = (cats: CategoryIndex): Field[] => [
+export const incomeFields = (cats: CategoryIndex, onAddCategory?: () => void): Field[] => [
   { name: "name", label: "收入名稱", type: "text", required: true },
-  categoryField(cats, "income", "類型", "type"),
+  categoryField(cats, "income", "類型", "type", onAddCategory),
   regionField, amountField, currencyField,
   {
     name: "frequency", label: "頻率", type: "select", required: true,
@@ -42,10 +53,12 @@ export const incomeFields = (cats: CategoryIndex): Field[] => [
   noteField,
 ];
 
-export const expenseFields = (cats: CategoryIndex): Field[] => [
+export const expenseFields = (cats: CategoryIndex, onAddCategory?: () => void): Field[] => [
   { name: "name", label: "項目名稱", type: "text", required: true },
   {
     name: "category", label: "類別", type: "select", required: true,
+    onAdd: onAddCategory,
+    addLabel: "＋ 新增分類",
     options: cats.list("expense").map((c) => ({ value: c.key, label: `${c.icon} ${c.label}` })),
   },
   regionField, amountField, currencyField,

@@ -6,24 +6,44 @@ type Kind = (typeof CATEGORY_KINDS)[number];
 
 const isKind = (v: unknown): v is Kind => typeof v === "string" && (CATEGORY_KINDS as readonly string[]).includes(v);
 
+/** 自訂分類的 sort 從這裡起跳,預設分類再怎麼擴充都不會追上 */
+const CUSTOM_SORT_BASE = 1000;
+
 /**
- * 首次讀取時把預設分類種進去。用 INSERT OR IGNORE 搭配唯一索引,
- * 併發重複呼叫也只會留一份。
+ * 把預設分類補齊。不是只在「一筆都沒有」時才跑——每次改版新增預設分類,
+ * 既有帳號也要拿得到,所以這裡是補差集而不是初始化。
+ *
+ * - INSERT OR IGNORE 搭配 (user_id, kind, key) 唯一索引:已存在的一律不動,
+ *   使用者改過的名稱、顏色、封存狀態都會保留。
+ * - sort 則一併校正。它不開放使用者編輯,統一更新才能讓新舊帳號的
+ *   排列順序一致,不會有人看到「其他」卡在清單中間。
  */
 export async function ensureCategories(db: D1Database, userId: number): Promise<void> {
-  const row = await db.prepare("SELECT COUNT(*) AS n FROM categories WHERE user_id = ?").bind(userId).first<{ n: number }>();
-  if (row && row.n > 0) return;
-
-  const stmt = db.prepare(
+  const insert = db.prepare(
     "INSERT OR IGNORE INTO categories (user_id, kind, key, group_name, label, icon, tint, sign, sort) " +
       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
+  const resort = db.prepare("UPDATE categories SET sort = ? WHERE user_id = ? AND kind = ? AND key = ?");
+
   const batch: D1PreparedStatement[] = [];
   for (const kind of CATEGORY_KINDS) {
     DEFAULTS[kind].forEach((c, i) => {
-      batch.push(stmt.bind(userId, kind, c.key, c.group, c.label, c.icon, c.tint, c.sign ?? 1, i));
+      batch.push(insert.bind(userId, kind, c.key, c.group, c.label, c.icon, c.tint, c.sign ?? 1, i));
+      batch.push(resort.bind(i, userId, kind, c.key));
     });
   }
+
+  // 自訂分類一律排在預設之後。早期版本用 MAX(sort)+1 產生 sort,
+  // 預設分類一擴充就會跟它們撞號、夾在清單中間,這裡把它們推到 1000 以上。
+  batch.push(
+    db
+      .prepare(
+        "UPDATE categories SET sort = 1000 + id " +
+          "WHERE user_id = ? AND sort < ? AND key LIKE 'c\\_%' ESCAPE '\\'",
+      )
+      .bind(userId, CUSTOM_SORT_BASE),
+  );
+
   await db.batch(batch);
 }
 
@@ -73,18 +93,19 @@ categoryRoutes.post("/", async (c) => {
 
   // 自訂 key 加前綴,永遠不會撞到預設分類
   const key = `c_${crypto.randomUUID().slice(0, 8)}`;
-  const next = await c.env.DB.prepare(
-    "SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM categories WHERE user_id = ? AND kind = ?",
+  const max = await c.env.DB.prepare(
+    "SELECT COALESCE(MAX(sort), 0) AS s FROM categories WHERE user_id = ? AND kind = ?",
   )
     .bind(userId, kind)
     .first<{ s: number }>();
+  const sort = Math.max(max?.s ?? 0, CUSTOM_SORT_BASE - 1) + 1;
 
   const row = await c.env.DB.prepare(
     "INSERT INTO categories (user_id, kind, key, group_name, label, icon, tint, sign, sort) " +
       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
       "RETURNING id, kind, key, group_name, label, icon, tint, sign, sort, archived",
   )
-    .bind(userId, kind, key, group, label, icon, tint, kind === "asset" ? sign : 1, next?.s ?? 0)
+    .bind(userId, kind, key, group, label, icon, tint, kind === "asset" ? sign : 1, sort)
     .first();
   return c.json(row, 201);
 });
