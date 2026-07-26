@@ -17,14 +17,14 @@ function greeting(h: number): string {
 }
 
 export default function Overview() {
-  const { user, assets, incomes, expenses, rates } = useStore();
+  const { user, assets, incomes, expenses, rates, cats } = useStore();
   const rateMap = rates.rates;
 
   const thisMonth = currentMonthKey();
   const lastMonth = shiftMonth(thisMonth, -1);
   const today = new Date().toISOString().slice(0, 10);
 
-  const netWorth = netWorthTWD(assets, rateMap);
+  const netWorth = netWorthTWD(assets, rateMap, cats.sign);
   const monthlyIncome = totalMonthlyIncomeTWD(incomes, rateMap);
   const thisMonthTotal = totalExpenseTWD(expensesInMonth(expenses, thisMonth), rateMap);
   const lastMonthTotal = totalExpenseTWD(expensesInMonth(expenses, lastMonth), rateMap);

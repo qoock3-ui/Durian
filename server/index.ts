@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppContext, Env } from "./env";
 import { authRoutes, requireAuth } from "./auth";
+import { categoryRoutes } from "./categories";
 import { crudRoutes } from "./crud";
 import { ratesRoutes, refreshRates } from "./rates";
 
@@ -18,6 +19,7 @@ app.get("/api/me", async (c) => {
   return c.json(user);
 });
 
+app.route("/api/categories", categoryRoutes);
 app.route("/api/assets", crudRoutes("assets"));
 app.route("/api/incomes", crudRoutes("incomes"));
 app.route("/api/expenses", crudRoutes("expenses"));

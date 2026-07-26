@@ -3,8 +3,8 @@ import { del, post, put } from "../api";
 import { useStore } from "../store";
 import { Bubble, Card, EmptyState, MonthNav, PrimaryButton, RegionBadge, RegionTabs, RowActions } from "../components/ui";
 import FormModal from "../components/FormModal";
-import { EXPENSE_FIELDS } from "../components/entityForms";
-import { EXPENSE_CATEGORIES, type Expense, type Region } from "../lib/constants";
+import { expenseFields } from "../components/entityForms";
+import { type Expense, type Region } from "../lib/constants";
 import { currentMonthKey, expensesInMonth, fmt, fmtTWD, toTWD, totalExpenseTWD } from "../lib/finance";
 
 export function shiftMonth(ym: string, delta: number): string {
@@ -12,8 +12,6 @@ export function shiftMonth(ym: string, delta: number): string {
   const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
-
-const catOf = (v: string) => EXPENSE_CATEGORIES.find((c) => c.value === v);
 
 /** 單筆花費列。不給 onEdit/onDelete 時不顯示操作鈕(總覽的最近交易用)。 */
 export function ExpenseRow({
@@ -29,14 +27,15 @@ export function ExpenseRow({
   onDelete?: (e: Expense) => void;
   showDate?: boolean;
 }) {
-  const cat = catOf(e.category);
+  const { cats } = useStore();
+  const label = cats.label("expense", e.category);
   // 快速記帳留空名稱時會帶入分類名,此時副標不再重複一次分類
-  const sub = [showDate ? e.date : null, e.name === cat?.label ? null : cat?.label, e.note]
+  const sub = [showDate ? e.date : null, e.name === label ? null : label, e.note]
     .filter(Boolean)
     .join(" · ");
   return (
     <li className="flex items-center gap-3 py-2.5">
-      <Bubble tint={cat?.tint}>{cat?.icon}</Bubble>
+      <Bubble tint={cats.tint("expense", e.category)}>{cats.icon("expense", e.category)}</Bubble>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate font-medium">{e.name}</span>
@@ -99,7 +98,7 @@ function dayLabel(date: string, today: string): string {
 }
 
 export default function Expenses() {
-  const { expenses, rates, refresh } = useStore();
+  const { expenses, rates, refresh, cats } = useStore();
   const [month, setMonth] = useState(currentMonthKey());
   const [tab, setTab] = useState<Region | "ALL">("ALL");
   const [editing, setEditing] = useState<Expense | "new" | null>(null);
@@ -178,10 +177,15 @@ export default function Expenses() {
       {editing && (
         <FormModal
           title={editing === "new" ? "新增花費" : "編輯花費"}
-          fields={EXPENSE_FIELDS}
+          fields={expenseFields(cats)}
           initial={
             editing === "new"
-              ? { currency: "TWD", region: "TW", date: new Date().toISOString().slice(0, 10) }
+              ? {
+                  currency: "TWD",
+                  region: "TW",
+                  category: cats.list("expense")[0]?.key ?? "",
+                  date: new Date().toISOString().slice(0, 10),
+                }
               : editing
           }
           onSubmit={save}

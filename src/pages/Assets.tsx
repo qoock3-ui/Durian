@@ -3,11 +3,8 @@ import { del, post, put } from "../api";
 import { useStore } from "../store";
 import { Bubble, Card, EmptyState, PrimaryButton, RegionBadge, RegionTabs, RowActions } from "../components/ui";
 import FormModal from "../components/FormModal";
-import { ASSET_FIELDS } from "../components/entityForms";
-import {
-  ASSET_CATEGORY_LABEL, ASSET_GROUPS, NEGATIVE_CATEGORIES, REGION_CURRENCY, REGION_FLAG, REGION_LABEL,
-  type Asset, type Region,
-} from "../lib/constants";
+import { assetFields } from "../components/entityForms";
+import { REGION_CURRENCY, REGION_FLAG, REGION_LABEL, type Asset, type Region } from "../lib/constants";
 import { fmt, fmtTWD, toTWD } from "../lib/finance";
 
 const REGION_CARDS: { region: Region; tint: string }[] = [
@@ -17,14 +14,15 @@ const REGION_CARDS: { region: Region; tint: string }[] = [
 ];
 
 export default function Assets() {
-  const { assets, rates, refresh } = useStore();
+  const { assets, rates, refresh, cats } = useStore();
   const [tab, setTab] = useState<Region | "ALL">("ALL");
   const [editing, setEditing] = useState<Asset | "new" | null>(null);
 
   const filtered = useMemo(() => (tab === "ALL" ? assets : assets.filter((a) => a.region === tab)), [assets, tab]);
 
+  // 負債 = 所有 sign 為 -1 的分類,使用者自己新增的負債分類也會自動算進來
   const liabilitySum = assets
-    .filter((a) => a.category === "liability")
+    .filter((a) => cats.sign(a.category) === -1)
     .reduce((s, a) => s + toTWD(a.amount, a.currency, rates.rates), 0);
 
   const save = async (values: Record<string, unknown>) => {
@@ -49,7 +47,7 @@ export default function Assets() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {REGION_CARDS.map(({ region, tint }) => {
           const currency = REGION_CURRENCY[region];
-          const items = assets.filter((a) => a.region === region && !NEGATIVE_CATEGORIES.includes(a.category));
+          const items = assets.filter((a) => a.region === region && cats.sign(a.category) === 1);
           const local = items.filter((a) => a.currency === currency).reduce((s, a) => s + a.amount, 0);
           const twd = items.reduce((s, a) => s + toTWD(a.amount, a.currency, rates.rates), 0);
           return (
@@ -82,16 +80,16 @@ export default function Assets() {
           />
         </Card>
       ) : (
-        ASSET_GROUPS.map((group) => {
-          const items = filtered.filter((a) => group.items.some((i) => i.value === a.category));
+        cats.groups("asset").map((group) => {
+          const items = filtered.filter((a) => group.items.some((i) => i.key === a.category));
           if (items.length === 0) return null;
           const subtotal = items.reduce((s, a) => s + toTWD(a.amount, a.currency, rates.rates), 0);
-          const negative = group.items.some((i) => NEGATIVE_CATEGORIES.includes(i.value));
+          const negative = group.items.some((i) => i.sign === -1);
           return (
             <Card key={group.group}>
               <div className="mb-2 flex items-center gap-3">
-                <Bubble tint={group.tint} size="sm">
-                  {group.icon}
+                <Bubble tint={group.items[0].tint} size="sm">
+                  {group.items[0].icon}
                 </Bubble>
                 <h2 className="flex-1 font-round font-bold">{group.group}</h2>
                 <span className={`tnum text-sm ${negative ? "text-danger" : "text-ink-2"}`}>
@@ -102,13 +100,16 @@ export default function Assets() {
               <ul className="divide-y-2 divide-line-soft">
                 {items.map((a) => (
                   <li key={a.id} className="flex items-center gap-3 py-2.5">
+                    <Bubble tint={cats.tint("asset", a.category)} size="sm">
+                      {cats.icon("asset", a.category)}
+                    </Bubble>
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         <span className="truncate font-medium">{a.name}</span>
                         <RegionBadge region={a.region} />
                       </div>
-                      <div className="text-xs text-ink-3">
-                        {ASSET_CATEGORY_LABEL[a.category]}
+                      <div className="truncate text-xs text-ink-3">
+                        {cats.label("asset", a.category)}
                         {a.note ? ` · ${a.note}` : ""}
                       </div>
                     </div>
@@ -132,8 +133,12 @@ export default function Assets() {
       {editing && (
         <FormModal
           title={editing === "new" ? "新增資產" : "編輯資產"}
-          fields={ASSET_FIELDS}
-          initial={editing === "new" ? { currency: "TWD", region: "TW" } : editing}
+          fields={assetFields(cats)}
+          initial={
+            editing === "new"
+              ? { currency: "TWD", region: "TW", category: cats.list("asset")[0]?.key ?? "" }
+              : editing
+          }
           onSubmit={save}
           onClose={() => setEditing(null)}
         />

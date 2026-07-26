@@ -1,15 +1,21 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { get, getToken, setToken } from "./api";
-import type { Asset, Expense, Income, Rates, User } from "./lib/constants";
+import { buildIndex, type CategoryIndex } from "./lib/categories";
+import type { Asset, Category, Expense, Income, Rates, User } from "./lib/constants";
+
+type Table = "assets" | "incomes" | "expenses" | "categories";
 
 type Store = {
   user: User | null;
   assets: Asset[];
   incomes: Income[];
   expenses: Expense[];
+  categories: Category[];
+  /** 分類查詢輔助,畫面一律透過它取標籤與顏色 */
+  cats: CategoryIndex;
   rates: Rates;
   loading: boolean;
-  refresh: (table?: "assets" | "incomes" | "expenses") => Promise<void>;
+  refresh: (table?: Table) => Promise<void>;
   login: (user: User, token: string) => void;
   logout: () => void;
 };
@@ -21,10 +27,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [rates, setRates] = useState<Rates>({ rates: { TWD: 1 }, updated_at: null });
   const [loading, setLoading] = useState(!!getToken());
 
-  const refresh = useCallback(async (table?: "assets" | "incomes" | "expenses") => {
+  const refresh = useCallback(async (table?: Table) => {
+    if (!table || table === "categories") setCategories(await get<Category[]>("/api/categories"));
     if (!table || table === "assets") setAssets(await get<Asset[]>("/api/assets"));
     if (!table || table === "incomes") setIncomes(await get<Income[]>("/api/incomes"));
     if (!table || table === "expenses") setExpenses(await get<Expense[]>("/api/expenses"));
@@ -60,10 +68,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setIncomes([]);
     setExpenses([]);
+    setCategories([]);
   }, []);
 
+  const cats = useMemo(() => buildIndex(categories), [categories]);
+
   return (
-    <StoreContext.Provider value={{ user, assets, incomes, expenses, rates, loading, refresh, login, logout }}>
+    <StoreContext.Provider
+      value={{ user, assets, incomes, expenses, categories, cats, rates, loading, refresh, login, logout }}
+    >
       {children}
     </StoreContext.Provider>
   );

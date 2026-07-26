@@ -1,8 +1,6 @@
 import type { Field } from "./FormModal";
-import {
-  ASSET_GROUPS, CURRENCIES, EXPENSE_CATEGORIES, FREQUENCIES, INCOME_TYPES,
-  REGIONS, REGION_LABEL,
-} from "../lib/constants";
+import type { CategoryIndex } from "../lib/categories";
+import { CURRENCIES, FREQUENCIES, REGIONS, REGION_LABEL } from "../lib/constants";
 
 const regionField: Field = {
   name: "region", label: "地區", type: "select", required: true,
@@ -15,18 +13,27 @@ const currencyField: Field = {
 };
 const noteField: Field = { name: "note", label: "備註", type: "textarea" };
 
-export const ASSET_FIELDS: Field[] = [
+/** 分類是動態的,表單欄位得跟著使用者當下的分類表產生 */
+const categoryField = (cats: CategoryIndex, kind: "asset" | "income", label: string, name: string): Field => ({
+  name,
+  label,
+  type: "select",
+  required: true,
+  groups: cats.groups(kind).map((g) => ({
+    group: g.group,
+    items: g.items.map((c) => ({ value: c.key, label: `${c.icon} ${c.label}` })),
+  })),
+});
+
+export const assetFields = (cats: CategoryIndex): Field[] => [
   { name: "name", label: "資產名稱", type: "text", required: true },
-  { name: "category", label: "類別", type: "select", required: true, groups: ASSET_GROUPS },
+  categoryField(cats, "asset", "類別", "category"),
   regionField, amountField, currencyField, noteField,
 ];
 
-export const INCOME_FIELDS: Field[] = [
+export const incomeFields = (cats: CategoryIndex): Field[] => [
   { name: "name", label: "收入名稱", type: "text", required: true },
-  {
-    name: "type", label: "類型", type: "select", required: true,
-    options: INCOME_TYPES.map((t) => ({ value: t.value, label: t.label })),
-  },
+  categoryField(cats, "income", "類型", "type"),
   regionField, amountField, currencyField,
   {
     name: "frequency", label: "頻率", type: "select", required: true,
@@ -35,11 +42,11 @@ export const INCOME_FIELDS: Field[] = [
   noteField,
 ];
 
-export const EXPENSE_FIELDS: Field[] = [
+export const expenseFields = (cats: CategoryIndex): Field[] => [
   { name: "name", label: "項目名稱", type: "text", required: true },
   {
     name: "category", label: "類別", type: "select", required: true,
-    options: EXPENSE_CATEGORIES.map((c) => ({ value: c.value, label: `${c.icon} ${c.label}` })),
+    options: cats.list("expense").map((c) => ({ value: c.key, label: `${c.icon} ${c.label}` })),
   },
   regionField, amountField, currencyField,
   { name: "date", label: "日期", type: "date", required: true },

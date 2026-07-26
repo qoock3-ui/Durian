@@ -4,7 +4,7 @@ import {
 } from "recharts";
 import { useStore } from "../store";
 import { Card, CardTitle, MonthNav } from "../components/ui";
-import { EXPENSE_CATEGORIES } from "../lib/constants";
+import { chartColor } from "../lib/constants";
 import { shiftMonth } from "./Expenses";
 import {
   currentMonthKey, expensesInMonth, fmtTWD, lastMonths, monthLabel, sumByCategory,
@@ -50,9 +50,10 @@ function ChartLegend({ items }: { items: { label: string; color: string }[] }) {
 }
 
 export default function Trends() {
-  const { incomes, expenses, rates } = useStore();
+  const { incomes, expenses, rates, cats } = useStore();
   const rateMap = rates.rates;
   const [month, setMonth] = useState(currentMonthKey());
+  const expenseCats = cats.list("expense");
 
   const monthlyIncome = totalMonthlyIncomeTWD(incomes, rateMap);
 
@@ -70,21 +71,22 @@ export default function Trends() {
       lastMonths(6).map((ym) => {
         const byCat = sumByCategory(expensesInMonth(expenses, ym), rateMap);
         const row: Record<string, number | string> = { label: monthLabel(ym) };
-        for (const c of EXPENSE_CATEGORIES) row[c.label] = Math.round(byCat[c.value] ?? 0);
+        for (const c of expenseCats) row[c.label] = Math.round(byCat[c.key] ?? 0);
         return row;
       }),
-    [expenses, rateMap],
+    [expenses, rateMap, expenseCats],
   );
 
   // 選定月份的分類占比
   const byCat = useMemo(() => sumByCategory(expensesInMonth(expenses, month), rateMap), [expenses, month, rateMap]);
-  const catRows = EXPENSE_CATEGORIES.map((c) => ({
-    cat: c.value,
-    label: c.label,
-    icon: c.icon,
-    color: c.color,
-    amount: byCat[c.value] ?? 0,
-  }))
+  const catRows = expenseCats
+    .map((c) => ({
+      cat: c.key,
+      label: c.label,
+      icon: c.icon,
+      color: chartColor(c.tint),
+      amount: byCat[c.key] ?? 0,
+    }))
     .filter((r) => r.amount > 0)
     .sort((a, b) => b.amount - a.amount);
   const catTotal = catRows.reduce((s, r) => s + r.amount, 0);
@@ -129,13 +131,13 @@ export default function Trends() {
               <XAxis dataKey="label" fontSize={12} />
               <YAxis fontSize={12} tickFormatter={axisFmt} />
               <Tooltip formatter={(v) => fmtTWD(Number(v))} {...TOOLTIP} />
-              {EXPENSE_CATEGORIES.map((c) => (
-                <Bar key={c.value} dataKey={c.label} stackId="spend" fill={c.color} />
+              {expenseCats.map((c) => (
+                <Bar key={c.key} dataKey={c.label} stackId="spend" fill={chartColor(c.tint)} />
               ))}
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <ChartLegend items={EXPENSE_CATEGORIES.map((c) => ({ label: c.label, color: c.color }))} />
+        <ChartLegend items={expenseCats.map((c) => ({ label: c.label, color: chartColor(c.tint) }))} />
       </Card>
 
       <Card>

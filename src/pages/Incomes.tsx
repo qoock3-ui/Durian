@@ -3,12 +3,12 @@ import { del, post, put } from "../api";
 import { useStore } from "../store";
 import { Badge, Bubble, Card, EmptyState, PrimaryButton, RegionBadge, RowActions } from "../components/ui";
 import FormModal from "../components/FormModal";
-import { INCOME_FIELDS } from "../components/entityForms";
-import { FREQUENCY_LABEL, INCOME_TYPES, type Income } from "../lib/constants";
+import { incomeFields } from "../components/entityForms";
+import { FREQUENCY_LABEL, type Income } from "../lib/constants";
 import { fmt, fmtTWD, monthlyAmount, totalMonthlyIncomeTWD } from "../lib/finance";
 
 export default function Incomes() {
-  const { incomes, rates, refresh } = useStore();
+  const { incomes, rates, refresh, cats } = useStore();
   const [editing, setEditing] = useState<Income | "new" | null>(null);
 
   const monthlyByCur = (cur: string) =>
@@ -61,27 +61,33 @@ export default function Incomes() {
           />
         </Card>
       ) : (
-        INCOME_TYPES.map((type) => {
-          const items = incomes.filter((i) => i.type === type.value);
+        cats.groups("income").map((group) => {
+          const items = incomes.filter((i) => group.items.some((c) => c.key === i.type));
           if (items.length === 0) return null;
           return (
-            <Card key={type.value}>
+            <Card key={group.group}>
               <div className="mb-2 flex items-center gap-3">
-                <Bubble tint={type.tint} size="sm">
-                  {type.icon}
+                <Bubble tint={group.items[0].tint} size="sm">
+                  {group.items[0].icon}
                 </Bubble>
-                <h2 className="font-round font-bold">{type.label}</h2>
+                <h2 className="font-round font-bold">{group.group}</h2>
               </div>
               <ul className="divide-y-2 divide-line-soft">
                 {items.map((i) => (
                   <li key={i.id} className="flex items-center gap-3 py-2.5">
+                    <Bubble tint={cats.tint("income", i.type)} size="sm">
+                      {cats.icon("income", i.type)}
+                    </Bubble>
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <span className="truncate font-medium">{i.name}</span>
                         <RegionBadge region={i.region} />
                         <Badge className="bg-p-mint">{FREQUENCY_LABEL[i.frequency]}</Badge>
                       </div>
-                      {i.note && <div className="text-xs text-ink-3">{i.note}</div>}
+                      <div className="truncate text-xs text-ink-3">
+                        {cats.label("income", i.type)}
+                        {i.note ? ` · ${i.note}` : ""}
+                      </div>
                     </div>
                     <div className="text-right">
                       <div className="tnum font-round text-base font-bold">{fmt(i.amount, i.currency)}</div>
@@ -101,8 +107,12 @@ export default function Incomes() {
       {editing && (
         <FormModal
           title={editing === "new" ? "新增收入" : "編輯收入"}
-          fields={INCOME_FIELDS}
-          initial={editing === "new" ? { currency: "TWD", region: "TW", frequency: "monthly" } : editing}
+          fields={incomeFields(cats)}
+          initial={
+            editing === "new"
+              ? { currency: "TWD", region: "TW", frequency: "monthly", type: cats.list("income")[0]?.key ?? "" }
+              : editing
+          }
           onSubmit={save}
           onClose={() => setEditing(null)}
         />
