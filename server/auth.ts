@@ -105,6 +105,12 @@ export const requireAuth: MiddlewareHandler<AppContext> = async (c, next) => {
   await next();
 };
 
+/** 這個 Email 是不是 ADMIN_EMAIL 指定的管理者。未設定時一律否(fail closed)。 */
+export function computeIsAdmin(env: Env, email: string): boolean {
+  const admin = env.ADMIN_EMAIL?.trim().toLowerCase();
+  return !!admin && email.trim().toLowerCase() === admin;
+}
+
 export const authRoutes = new Hono<AppContext>();
 
 authRoutes.post("/register", async (c) => {
@@ -125,7 +131,10 @@ authRoutes.post("/register", async (c) => {
     .bind(email, name, hash)
     .first<{ id: number }>();
   const token = await signJwt(row!.id, c.env);
-  return c.json({ token, user: { id: row!.id, email, name } });
+  return c.json({
+    token,
+    user: { id: row!.id, email, name, is_admin: computeIsAdmin(c.env, email) },
+  });
 });
 
 authRoutes.post("/login", async (c) => {
@@ -158,7 +167,15 @@ authRoutes.post("/login", async (c) => {
   if (!authenticated) return c.json({ error: "帳號或密碼錯誤" }, 401);
 
   const token = await signJwt(user.id, c.env);
-  return c.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+  return c.json({
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      is_admin: computeIsAdmin(c.env, user.email),
+    },
+  });
 });
 
 authRoutes.post("/change-password", requireAuth, async (c) => {
@@ -169,12 +186,20 @@ authRoutes.post("/change-password", requireAuth, async (c) => {
     return c.json({ error: "新密碼至少 8 碼" }, 400);
   }
   const userId = c.get("userId");
-  const user = await c.env.DB.prepare("SELECT password_hash FROM users WHERE id = ?")
+  const user = await c.env.DB.prepare(
+    "SELECT password_hash, reset_hash, reset_expires FROM users WHERE id = ?",
+  )
     .bind(userId)
-    .first<{ password_hash: string }>();
-  if (!user || !(await verifyPassword(currentPassword, user.password_hash))) {
-    return c.json({ error: "目前密碼錯誤" }, 401);
+    .first<{ password_hash: string; reset_hash: string | null; reset_expires: string | null }>();
+  if (!user) return c.json({ error: "目前密碼錯誤" }, 401);
+
+  // 也接受尚未過期的臨時密碼——用臨時密碼登入的人並不知道原本的密碼,
+  // 只認 password_hash 的話他們就永遠改不了密碼。
+  let ok = await verifyPassword(currentPassword, user.password_hash);
+  if (!ok && user.reset_hash && user.reset_expires && new Date(user.reset_expires).getTime() > Date.now()) {
+    ok = await verifyPassword(currentPassword, user.reset_hash);
   }
+  if (!ok) return c.json({ error: "目前密碼錯誤" }, 401);
   const newHash = await hashPassword(newPassword);
   await c.env.DB.prepare(
     "UPDATE users SET password_hash = ?, reset_hash = NULL, reset_expires = NULL WHERE id = ?",
@@ -212,4 +237,41 @@ authRoutes.post("/forgot-password", async (c) => {
   }
 
   return c.json({ ok: true });
+});
+
+/** 呼叫者是不是管理者。前端的 is_admin 只用來決定要不要顯示,權限一律以這裡為準。 */
+async function isAdmin(c: { env: Env; get: (k: "userId") => number }): Promise<boolean> {
+  const row = await c.env.DB.prepare("SELECT email FROM users WHERE id = ?")
+    .bind(c.get("userId"))
+    .first<{ email: string }>();
+  return !!row && computeIsAdmin(c.env, row.email);
+}
+
+/**
+ * 管理者核發臨時密碼。
+ *
+ * 寄件網域還沒驗證,信送不出去,所以這裡把明文直接回給管理者,
+ * 由他透過其他管道轉交。這是目前唯一能救回被鎖在門外的帳號的途徑。
+ * 明文只出現在這個回應裡,不寫進資料庫也不寫進 log。
+ */
+authRoutes.post("/admin/temp-password", requireAuth, async (c) => {
+  if (!(await isAdmin(c))) return c.json({ error: "forbidden" }, 403);
+
+  const body = await c.req.json<{ email?: string }>();
+  const email = body.email?.trim().toLowerCase() ?? "";
+  if (!email) return c.json({ error: "請輸入 Email" }, 400);
+
+  const user = await c.env.DB.prepare("SELECT id, email, name FROM users WHERE email = ?")
+    .bind(email)
+    .first<{ id: number; email: string; name: string }>();
+  if (!user) return c.json({ error: "查無此帳號" }, 404);
+
+  const tempPassword = generateTempPassword();
+  const resetHash = await hashPassword(tempPassword);
+  const resetExpires = new Date(Date.now() + RESET_TTL_MS).toISOString();
+  await c.env.DB.prepare("UPDATE users SET reset_hash = ?, reset_expires = ? WHERE id = ?")
+    .bind(resetHash, resetExpires, user.id)
+    .run();
+
+  return c.json({ email: user.email, name: user.name, tempPassword, expiresAt: resetExpires });
 });

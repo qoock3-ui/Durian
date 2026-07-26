@@ -26,7 +26,9 @@
     // 開放註冊。每個帳號的資料完全隔離:所有查詢都以 JWT 帶出的 user_id
     // 為條件,分類也是各自一份(首次讀取時種入)。
     "ALLOW_REGISTRATION": "true",
-    "MAIL_FROM": "qoock3@gmail.com"
+    "MAIL_FROM": "qoock3@gmail.com",
+    // 只有這個帳號看得到「核發臨時密碼」功能。留空即整個關閉。
+    "ADMIN_EMAIL": "qoock3@gmail.com"
   },
   "observability": {
     "enabled": true
