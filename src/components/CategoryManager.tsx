@@ -24,11 +24,26 @@ const emptyDraft = (group: string): Draft => ({
   sign: 1,
 });
 
-export default function CategoryManager({ onClose }: { onClose: () => void }) {
+export default function CategoryManager({
+  onClose,
+  initialKind = "expense",
+  autoAdd = false,
+  onCreated,
+}: {
+  onClose: () => void;
+  /** 從新增表單叫出來時,直接停在對應的類型 */
+  initialKind?: CategoryKind;
+  /** 直接展開新增表單,省去再按一次 */
+  autoAdd?: boolean;
+  /** 建立完成後把新分類回傳給呼叫端,讓它自動選起來 */
+  onCreated?: (c: Category) => void;
+}) {
   const { cats, refresh } = useStore();
-  const [kind, setKind] = useState<CategoryKind>("expense");
+  const [kind, setKind] = useState<CategoryKind>(initialKind);
   const [editing, setEditing] = useState<Category | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(() =>
+    autoAdd ? emptyDraft(cats.groups(initialKind)[0]?.group ?? "其他") : null,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -59,10 +74,17 @@ export default function CategoryManager({ onClose }: { onClose: () => void }) {
     try {
       if (editing) {
         await put(`/api/categories/${editing.id}`, { ...draft, archived: editing.archived });
+        await refresh("categories");
       } else {
-        await post("/api/categories", { ...draft, kind });
+        const created = await post<Category>("/api/categories", { ...draft, kind });
+        await refresh("categories");
+        // 從新增表單叫出來的情況:建完直接選起來並關閉,不用再翻一次清單
+        if (onCreated) {
+          onCreated(created);
+          onClose();
+          return;
+        }
       }
-      await refresh("categories");
       setDraft(null);
       setEditing(null);
     } catch (e) {

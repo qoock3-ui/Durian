@@ -3,6 +3,7 @@ import { del, post, put } from "../api";
 import { useStore } from "../store";
 import { Bubble, Card, EmptyState, PrimaryButton, RegionBadge, RegionTabs, RowActions } from "../components/ui";
 import FormModal from "../components/FormModal";
+import CategoryManager from "../components/CategoryManager";
 import { incomeFields } from "../components/entityForms";
 import { FREQUENCY_LABEL, REGION_FLAG, type Income, type Region } from "../lib/constants";
 import { fmt, fmtTWD, monthlyAmount, toTWD, totalMonthlyIncomeTWD } from "../lib/finance";
@@ -11,6 +12,8 @@ export default function Incomes() {
   const { incomes, rates, refresh, cats } = useStore();
   const [tab, setTab] = useState<Region | "ALL">("ALL");
   const [editing, setEditing] = useState<Income | "new" | null>(null);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [patch, setPatch] = useState<Record<string, string> | undefined>();
 
   const rateMap = rates.rates;
   const filtered = useMemo(() => (tab === "ALL" ? incomes : incomes.filter((i) => i.region === tab)), [incomes, tab]);
@@ -117,14 +120,27 @@ export default function Incomes() {
       {editing && (
         <FormModal
           title={editing === "new" ? "新增收入" : "編輯收入"}
-          fields={incomeFields(cats)}
+          fields={incomeFields(cats, () => setAddingCategory(true))}
           initial={
             editing === "new"
               ? { currency: "TWD", region: "TW", frequency: "monthly", type: cats.list("income")[0]?.key ?? "" }
               : editing
           }
+          patch={patch}
           onSubmit={save}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            setPatch(undefined);
+          }}
+        />
+      )}
+
+      {addingCategory && (
+        <CategoryManager
+          initialKind="income"
+          autoAdd
+          onCreated={(c) => setPatch({ type: c.key })}
+          onClose={() => setAddingCategory(false)}
         />
       )}
     </div>

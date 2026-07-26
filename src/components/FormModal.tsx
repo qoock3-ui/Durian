@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { GhostButton, ModalShell, PrimaryButton, inputClass } from "./ui";
 
 export type Field = {
@@ -9,18 +9,24 @@ export type Field = {
   options?: { value: string; label: string }[];
   /** 分組下拉(資產類別用) */
   groups?: { group: string; items: { value: string; label: string }[] }[];
+  /** 給選單一個「就地新增選項」的入口,例如新增分類 */
+  onAdd?: () => void;
+  addLabel?: string;
 };
 
 export default function FormModal({
   title,
   fields,
   initial,
+  patch,
   onSubmit,
   onClose,
 }: {
   title: string;
   fields: Field[];
   initial: Record<string, string | number | null | undefined>;
+  /** 外部塞值進來(例如就地新增分類後自動選起來),不重置其他已填欄位 */
+  patch?: Record<string, string>;
   onSubmit: (values: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
 }) {
@@ -29,6 +35,10 @@ export default function FormModal({
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (patch) setValues((prev) => ({ ...prev, ...patch }));
+  }, [patch]);
 
   const set = (name: string, v: string) => setValues((prev) => ({ ...prev, [name]: v }));
 
@@ -88,9 +98,20 @@ export default function FormModal({
       <div className="space-y-3">
         {fields.map((f) => (
           <label key={f.name} className="block">
-            <span className="mb-1 block text-sm font-medium text-ink-2">
-              {f.label}
-              {f.required && <span className="text-danger"> *</span>}
+            <span className="mb-1 flex items-baseline justify-between gap-2 text-sm font-medium text-ink-2">
+              <span>
+                {f.label}
+                {f.required && <span className="text-danger"> *</span>}
+              </span>
+              {f.onAdd && (
+                <button
+                  type="button"
+                  onClick={f.onAdd}
+                  className="text-xs text-mango-d underline-offset-2 hover:underline"
+                >
+                  {f.addLabel ?? "＋ 新增選項"}
+                </button>
+              )}
             </span>
             {renderField(f)}
           </label>

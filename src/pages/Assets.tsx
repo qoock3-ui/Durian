@@ -3,6 +3,7 @@ import { del, post, put } from "../api";
 import { useStore } from "../store";
 import { Bubble, Card, EmptyState, PrimaryButton, RegionBadge, RegionTabs, RowActions } from "../components/ui";
 import FormModal from "../components/FormModal";
+import CategoryManager from "../components/CategoryManager";
 import { assetFields } from "../components/entityForms";
 import { REGION_FLAG, type Asset, type Region } from "../lib/constants";
 import { fmt, fmtTWD, netWorthTWD, toTWD } from "../lib/finance";
@@ -11,6 +12,8 @@ export default function Assets() {
   const { assets, rates, refresh, cats } = useStore();
   const [tab, setTab] = useState<Region | "ALL">("ALL");
   const [editing, setEditing] = useState<Asset | "new" | null>(null);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [patch, setPatch] = useState<Record<string, string> | undefined>();
 
   const rateMap = rates.rates;
   const filtered = useMemo(() => (tab === "ALL" ? assets : assets.filter((a) => a.region === tab)), [assets, tab]);
@@ -131,14 +134,27 @@ export default function Assets() {
       {editing && (
         <FormModal
           title={editing === "new" ? "新增資產" : "編輯資產"}
-          fields={assetFields(cats)}
+          fields={assetFields(cats, () => setAddingCategory(true))}
           initial={
             editing === "new"
               ? { currency: "TWD", region: "TW", category: cats.list("asset")[0]?.key ?? "" }
               : editing
           }
+          patch={patch}
           onSubmit={save}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            setPatch(undefined);
+          }}
+        />
+      )}
+
+      {addingCategory && (
+        <CategoryManager
+          initialKind="asset"
+          autoAdd
+          onCreated={(c) => setPatch({ category: c.key })}
+          onClose={() => setAddingCategory(false)}
         />
       )}
     </div>

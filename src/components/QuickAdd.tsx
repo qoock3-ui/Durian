@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { post } from "../api";
 import { useStore } from "../store";
 import { Bubble } from "./ui";
+import CategoryManager from "./CategoryManager";
 import {
   CURRENCIES, REGION_CURRENCY, REGION_FLAG, REGION_LABEL, REGIONS,
   type Currency, type Region,
@@ -57,6 +58,7 @@ export default function QuickAdd({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [addingCategory, setAddingCategory] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -185,7 +187,7 @@ export default function QuickAdd({
           </button>
         </div>
 
-        {/* 分類 */}
+        {/* 分類。最後一格可以當場開新分類,不必先跑一趟分類管理 */}
         <div className="grid max-h-52 grid-cols-4 gap-2 overflow-y-auto pb-3">
           {options.map((c) => (
             <button
@@ -202,6 +204,12 @@ export default function QuickAdd({
               </span>
             </button>
           ))}
+          <button onClick={() => setAddingCategory(true)} className="flex flex-col items-center gap-1">
+            <span className="inline-grid h-11 w-11 shrink-0 place-items-center rounded-full border-2 border-dashed border-ink-3 text-lg text-ink-3">
+              ＋
+            </span>
+            <span className="text-[11px] leading-tight text-ink-3">新增分類</span>
+          </button>
         </div>
 
         {/* 地區(決定幣別) */}
@@ -291,6 +299,15 @@ export default function QuickAdd({
           <button onClick={() => digit(".")} className={`${keyBase} bg-card py-3`}>.</button>
         </div>
       </div>
+
+      {addingCategory && (
+        <CategoryManager
+          initialKind="expense"
+          autoAdd
+          onCreated={(c) => setCategory(c.key)}
+          onClose={() => setAddingCategory(false)}
+        />
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { del, put } from "../api";
 import { useStore } from "../store";
 import { Bubble, Card, EmptyState, MonthNav, PrimaryButton, RegionBadge, RegionTabs, RowActions, Toast } from "../components/ui";
 import FormModal from "../components/FormModal";
+import CategoryManager from "../components/CategoryManager";
 import QuickAdd from "../components/QuickAdd";
 import { expenseFields } from "../components/entityForms";
 import { type Expense, type Region } from "../lib/constants";
@@ -105,6 +106,8 @@ export default function Expenses() {
   // 新增走計算機面板(快),編輯走完整表單(需要改日期、地區、備註)
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [patch, setPatch] = useState<Record<string, string> | undefined>();
   const [toast, setToast] = useState("");
 
   const monthItems = useMemo(() => {
@@ -183,10 +186,23 @@ export default function Expenses() {
       {editing && (
         <FormModal
           title="編輯花費"
-          fields={expenseFields(cats)}
+          fields={expenseFields(cats, () => setAddingCategory(true))}
           initial={editing}
+          patch={patch}
           onSubmit={save}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            setPatch(undefined);
+          }}
+        />
+      )}
+
+      {addingCategory && (
+        <CategoryManager
+          initialKind="expense"
+          autoAdd
+          onCreated={(c) => setPatch({ category: c.key })}
+          onClose={() => setAddingCategory(false)}
         />
       )}
 
