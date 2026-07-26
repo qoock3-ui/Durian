@@ -23,8 +23,9 @@
     "crons": ["0 * * * *"]
   },
   "vars": {
-    // 已關閉註冊(帳號已建立)。若需重新開放,改回 "true" 再部署
-    "ALLOW_REGISTRATION": "false",
+    // 開放註冊。每個帳號的資料完全隔離:所有查詢都以 JWT 帶出的 user_id
+    // 為條件,分類也是各自一份(首次讀取時種入)。
+    "ALLOW_REGISTRATION": "true",
     "MAIL_FROM": "qoock3@gmail.com"
   },
   "observability": {
