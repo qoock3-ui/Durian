@@ -19,15 +19,18 @@
 | Worker | `fintrack` | `durian-shop` |
 | 網址 | fintrack.qoock3.workers.dev | durian-shop.qoock3.workers.dev |
 | D1 資料庫 | `fintrack-db` | `durian-db` |
-| D1 UUID | `8dc509fc-f072-4526-b4a3-391de733fcd7` | `db834b16-…` |
 | 程式碼 | 本 repo | 另一個 repo |
 
-`wrangler.jsonc` 綁定的是**寫死的 database_id**,不只是名稱,
+**一眼確認你在對的地方**:打開 `wrangler.jsonc`,`name` 應為 `fintrack`、
+`database_name` 應為 `fintrack-db`。看到 `durian-shop` 或 `durian-db` 就是走錯 repo 了。
+
+`wrangler.jsonc` 綁定的是寫死的 `database_id`(UUID),不只是名稱,
 因此本 repo 的部署在設定層級上就無法指向 `durian-db`。
+UUID 以 `wrangler.jsonc` 為唯一準據,本文件不複寫,以免兩邊失準。
 
 修改本 repo 時請確認:
 
-- `wrangler.jsonc` 的 `name` 維持 `fintrack`,`database_id` 維持上表的 UUID
+- `wrangler.jsonc` 的 `name` 與 `database_id` 未被更動
 - 新增 migration 前先確認是要改 `fintrack-db`,不是榴槤平台的資料表
 - 帳號下另有一個名為 `durian` 的 Worker,無任何 binding(空殼),與本專案無關
 
