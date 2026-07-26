@@ -3,8 +3,8 @@ import { post } from "../api";
 import { useStore } from "../store";
 import { Bubble } from "./ui";
 import {
-  CURRENCIES, EXPENSE_CATEGORIES, REGION_CURRENCY, REGION_FLAG, REGION_LABEL, REGIONS,
-  type Currency, type ExpenseCategory, type Region,
+  CURRENCIES, REGION_CURRENCY, REGION_FLAG, REGION_LABEL, REGIONS,
+  type Currency, type Region,
 } from "../lib/constants";
 import { fmtTWD, toTWD } from "../lib/finance";
 
@@ -40,13 +40,14 @@ export default function QuickAdd({
   onClose: () => void;
   onSaved: (message: string) => void;
 }) {
-  const { rates, refresh } = useStore();
+  const { rates, refresh, cats } = useStore();
+  const options = cats.list("expense");
 
   const [entry, setEntry] = useState("");
   const [acc, setAcc] = useState<number | null>(null);
   const [op, setOp] = useState<Op | null>(null);
 
-  const [category, setCategory] = useState<ExpenseCategory>("food");
+  const [category, setCategory] = useState(options[0]?.key ?? "");
   const [region, setRegion] = useState<Region>("TW");
   const [currency, setCurrency] = useState<Currency>("TWD");
   const [date, setDate] = useState(ymd(new Date()));
@@ -108,9 +109,13 @@ export default function QuickAdd({
       setError("請先輸入金額");
       return;
     }
+    if (!category) {
+      setError("請先選擇分類");
+      return;
+    }
     setBusy(true);
     setError("");
-    const label = EXPENSE_CATEGORIES.find((c) => c.value === category)!.label;
+    const label = cats.label("expense", category);
     try {
       await post("/api/expenses", {
         name: name.trim() || label,
@@ -181,18 +186,18 @@ export default function QuickAdd({
         </div>
 
         {/* 分類 */}
-        <div className="grid grid-cols-4 gap-2 pb-3">
-          {EXPENSE_CATEGORIES.map((c) => (
+        <div className="grid max-h-52 grid-cols-4 gap-2 overflow-y-auto pb-3">
+          {options.map((c) => (
             <button
-              key={c.value}
-              onClick={() => setCategory(c.value)}
+              key={c.key}
+              onClick={() => setCategory(c.key)}
               className="flex flex-col items-center gap-1"
-              aria-pressed={category === c.value}
+              aria-pressed={category === c.key}
             >
-              <Bubble tint={c.tint} active={category === c.value}>
+              <Bubble tint={c.tint} active={category === c.key}>
                 {c.icon}
               </Bubble>
-              <span className={`text-[11px] ${category === c.value ? "font-bold text-ink" : "text-ink-2"}`}>
+              <span className={`text-[11px] leading-tight ${category === c.key ? "font-bold text-ink" : "text-ink-2"}`}>
                 {c.label}
               </span>
             </button>
@@ -237,7 +242,7 @@ export default function QuickAdd({
           <div className="mb-3 space-y-2">
             <input
               type="text"
-              placeholder={`名稱(留空為「${EXPENSE_CATEGORIES.find((c) => c.value === category)!.label}」)`}
+              placeholder={`名稱(留空為「${cats.label("expense", category)}」)`}
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded-mid border-2 border-ink bg-card px-3 py-2 text-sm"

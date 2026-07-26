@@ -1,32 +1,23 @@
 import { Hono } from "hono";
 import type { AppContext } from "./env";
 import { CURRENCIES } from "./rates";
+import { categoryExists, ensureCategories } from "./categories";
 
 type FieldSpec = {
   name: string;
-  kind: "string" | "number" | "enum" | "date" | "optional-string";
+  kind: "string" | "number" | "enum" | "date" | "optional-string" | "category";
   values?: readonly string[];
+  /** kind 為 category 時,要比對哪一類的分類表 */
+  categoryKind?: "asset" | "income" | "expense";
 };
 
 const REGIONS = ["TW", "VN", "US", "OTHER"] as const;
-
-const ASSET_CATEGORIES = [
-  "cash_tw", "cash_vn", "cash_other",
-  "stock_tw", "etf_fund", "stock_vn", "stock_us",
-  "realestate_tw", "realestate_vn",
-  "insurance", "pension", "liability", "other",
-] as const;
-
-const INCOME_TYPES = ["active", "passive", "investment", "other"] as const;
 const FREQUENCIES = ["monthly", "yearly", "once"] as const;
-const EXPENSE_CATEGORIES = [
-  "food", "transport", "housing", "entertainment", "medical", "shopping", "work", "other",
-] as const;
 
 const TABLES: Record<string, FieldSpec[]> = {
   assets: [
     { name: "name", kind: "string" },
-    { name: "category", kind: "enum", values: ASSET_CATEGORIES },
+    { name: "category", kind: "category", categoryKind: "asset" },
     { name: "region", kind: "enum", values: REGIONS },
     { name: "amount", kind: "number" },
     { name: "currency", kind: "enum", values: CURRENCIES },
@@ -34,7 +25,7 @@ const TABLES: Record<string, FieldSpec[]> = {
   ],
   incomes: [
     { name: "name", kind: "string" },
-    { name: "type", kind: "enum", values: INCOME_TYPES },
+    { name: "type", kind: "category", categoryKind: "income" },
     { name: "region", kind: "enum", values: REGIONS },
     { name: "amount", kind: "number" },
     { name: "currency", kind: "enum", values: CURRENCIES },
@@ -43,7 +34,7 @@ const TABLES: Record<string, FieldSpec[]> = {
   ],
   expenses: [
     { name: "name", kind: "string" },
-    { name: "category", kind: "enum", values: EXPENSE_CATEGORIES },
+    { name: "category", kind: "category", categoryKind: "expense" },
     { name: "region", kind: "enum", values: REGIONS },
     { name: "amount", kind: "number" },
     { name: "currency", kind: "enum", values: CURRENCIES },
@@ -73,12 +64,34 @@ function validate(fields: FieldSpec[], body: Record<string, unknown>): { values:
         if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return { values, error: `${f.name} 格式須為 YYYY-MM-DD` };
         values.push(v);
         break;
+      case "category":
+        // 只做格式檢查,是否真的存在留給 checkCategories 查資料庫
+        if (typeof v !== "string" || !v.trim()) return { values, error: `${f.name} 為必填` };
+        values.push(v.trim());
+        break;
       case "optional-string":
         values.push(typeof v === "string" && v.trim() ? v.trim() : null);
         break;
     }
   }
   return { values };
+}
+
+/** 分類是動態的,得回資料庫確認這個 key 屬於該使用者 */
+async function checkCategories(
+  db: D1Database,
+  userId: number,
+  fields: FieldSpec[],
+  values: unknown[],
+): Promise<string | null> {
+  await ensureCategories(db, userId);
+  for (let i = 0; i < fields.length; i++) {
+    const f = fields[i];
+    if (f.kind !== "category") continue;
+    const ok = await categoryExists(db, userId, f.categoryKind!, values[i] as string);
+    if (!ok) return `${f.name} 值不合法`;
+  }
+  return null;
 }
 
 export function crudRoutes(table: keyof typeof TABLES) {
@@ -99,6 +112,8 @@ export function crudRoutes(table: keyof typeof TABLES) {
     const body = await c.req.json<Record<string, unknown>>();
     const { values, error } = validate(fields, body);
     if (error) return c.json({ error }, 400);
+    const catError = await checkCategories(c.env.DB, c.get("userId"), fields, values);
+    if (catError) return c.json({ error: catError }, 400);
     const row = await c.env.DB.prepare(
       `INSERT INTO ${table} (user_id, ${cols.join(", ")}) VALUES (?${", ?".repeat(cols.length)}) RETURNING id, ${cols.join(", ")}`,
     )
@@ -112,6 +127,8 @@ export function crudRoutes(table: keyof typeof TABLES) {
     const body = await c.req.json<Record<string, unknown>>();
     const { values, error } = validate(fields, body);
     if (error) return c.json({ error }, 400);
+    const catError = await checkCategories(c.env.DB, c.get("userId"), fields, values);
+    if (catError) return c.json({ error: catError }, 400);
     const row = await c.env.DB.prepare(
       `UPDATE ${table} SET ${cols.map((n) => `${n} = ?`).join(", ")}, updated_at = datetime('now') ` +
         `WHERE id = ? AND user_id = ? RETURNING id, ${cols.join(", ")}`,

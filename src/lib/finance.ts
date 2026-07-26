@@ -1,5 +1,4 @@
 import type { Asset, Currency, Expense, Income } from "./constants";
-import { NEGATIVE_CATEGORIES } from "./constants";
 
 export type RateMap = Record<string, number>;
 
@@ -27,12 +26,12 @@ export function totalMonthlyIncomeTWD(incomes: Income[], rates: RateMap): number
   return incomes.reduce((sum, i) => sum + toTWD(monthlyAmount(i), i.currency, rates), 0);
 }
 
-/** 淨資產:(現金+投資+不動產+勞退+其他) − (負債+保險),TWD */
-export function netWorthTWD(assets: Asset[], rates: RateMap): number {
-  return assets.reduce((sum, a) => {
-    const twd = toTWD(a.amount, a.currency, rates);
-    return sum + (NEGATIVE_CATEGORIES.includes(a.category) ? -twd : twd);
-  }, 0);
+/**
+ * 淨資產(TWD)。正負號由分類自己帶(Category.sign),
+ * 所以使用者新增的負債分類會自動被當成減項,不必再維護一份清單。
+ */
+export function netWorthTWD(assets: Asset[], rates: RateMap, signOf: (key: string) => number): number {
+  return assets.reduce((sum, a) => sum + signOf(a.category) * toTWD(a.amount, a.currency, rates), 0);
 }
 
 export function monthKey(date: string): string {
