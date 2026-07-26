@@ -28,7 +28,8 @@
     "ALLOW_REGISTRATION": "true",
     "MAIL_FROM": "qoock3@gmail.com",
     // 只有這個帳號看得到「核發臨時密碼」功能。留空即整個關閉。
-    "ADMIN_EMAIL": "qoock3@gmail.com"
+    // 注意這與上面的 MAIL_FROM 無關 —— MAIL_FROM 是寄件人,這裡是登入用的帳號。
+    "ADMIN_EMAIL": "about5221201x@gmail.com"
   },
   "observability": {
     "enabled": true
