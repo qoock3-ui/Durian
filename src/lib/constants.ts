@@ -6,11 +6,19 @@ export type Region = (typeof REGIONS)[number];
 
 export const REGION_LABEL: Record<Region, string> = { TW: "台灣", VN: "越南", US: "美國", OTHER: "其他地區" };
 export const REGION_FLAG: Record<Region, string> = { TW: "🇹🇼", VN: "🇻🇳", US: "🇺🇸", OTHER: "🌏" };
+/** 地區 badge 底色(粉彩,搭配 ink 描邊) */
 export const REGION_COLOR: Record<Region, string> = {
-  TW: "bg-blue-100 text-blue-700",
-  VN: "bg-red-100 text-red-700",
-  US: "bg-indigo-100 text-indigo-700",
-  OTHER: "bg-slate-100 text-slate-600",
+  TW: "bg-p-sky",
+  VN: "bg-p-rose",
+  US: "bg-p-lilac",
+  OTHER: "bg-p-stone",
+};
+/** 各地區的預設幣別,記帳時自動帶入 */
+export const REGION_CURRENCY: Record<Region, Currency> = {
+  TW: "TWD",
+  VN: "VND",
+  US: "USD",
+  OTHER: "TWD",
 };
 
 // ── 資產分類(含分組,對應規格書下拉選單結構)──────────────────
@@ -20,9 +28,11 @@ export type AssetCategory =
   | "realestate_tw" | "realestate_vn"
   | "insurance" | "pension" | "liability" | "other";
 
-export const ASSET_GROUPS: { group: string; icon: string; items: { value: AssetCategory; label: string }[] }[] = [
+export const ASSET_GROUPS: {
+  group: string; icon: string; tint: string; items: { value: AssetCategory; label: string }[];
+}[] = [
   {
-    group: "現金與存款", icon: "💰",
+    group: "現金與存款", icon: "💰", tint: "bg-p-mint",
     items: [
       { value: "cash_tw", label: "現金/存款(台灣)" },
       { value: "cash_vn", label: "現金/存款(越南)" },
@@ -30,7 +40,7 @@ export const ASSET_GROUPS: { group: string; icon: string; items: { value: AssetC
     ],
   },
   {
-    group: "投資", icon: "📈",
+    group: "投資", icon: "📈", tint: "bg-p-sky",
     items: [
       { value: "stock_tw", label: "台股" },
       { value: "etf_fund", label: "ETF/基金" },
@@ -39,16 +49,16 @@ export const ASSET_GROUPS: { group: string; icon: string; items: { value: AssetC
     ],
   },
   {
-    group: "不動產", icon: "🏠",
+    group: "不動產", icon: "🏠", tint: "bg-p-lilac",
     items: [
       { value: "realestate_tw", label: "台灣房產" },
       { value: "realestate_vn", label: "越南房產" },
     ],
   },
-  { group: "保障", icon: "🛡️", items: [{ value: "insurance", label: "保險" }] },
-  { group: "勞退/退休金", icon: "🏦", items: [{ value: "pension", label: "勞退/退休金" }] },
-  { group: "負債", icon: "💳", items: [{ value: "liability", label: "負債" }] },
-  { group: "其他", icon: "📦", items: [{ value: "other", label: "其他" }] },
+  { group: "保障", icon: "🛡️", tint: "bg-p-sage", items: [{ value: "insurance", label: "保險" }] },
+  { group: "勞退/退休金", icon: "🏦", tint: "bg-p-butter", items: [{ value: "pension", label: "勞退/退休金" }] },
+  { group: "負債", icon: "💳", tint: "bg-p-rose", items: [{ value: "liability", label: "負債" }] },
+  { group: "其他", icon: "📦", tint: "bg-p-stone", items: [{ value: "other", label: "其他" }] },
 ];
 
 export const ASSET_CATEGORY_LABEL: Record<AssetCategory, string> = Object.fromEntries(
@@ -64,11 +74,11 @@ export const NEGATIVE_CATEGORIES: AssetCategory[] = ["liability", "insurance"];
 
 // ── 收入 ─────────────────────────────────────────────
 export type IncomeType = "active" | "passive" | "investment" | "other";
-export const INCOME_TYPES: { value: IncomeType; label: string; icon: string }[] = [
-  { value: "active", label: "主動收入(薪資)", icon: "💼" },
-  { value: "passive", label: "被動收入", icon: "🌱" },
-  { value: "investment", label: "投資收益", icon: "📊" },
-  { value: "other", label: "其他收入", icon: "✨" },
+export const INCOME_TYPES: { value: IncomeType; label: string; icon: string; tint: string }[] = [
+  { value: "active", label: "主動收入(薪資)", icon: "💼", tint: "bg-p-mint" },
+  { value: "passive", label: "被動收入", icon: "🌱", tint: "bg-p-sage" },
+  { value: "investment", label: "投資收益", icon: "📊", tint: "bg-p-sky" },
+  { value: "other", label: "其他收入", icon: "✨", tint: "bg-p-butter" },
 ];
 export const INCOME_TYPE_LABEL = Object.fromEntries(INCOME_TYPES.map((t) => [t.value, t.label])) as Record<IncomeType, string>;
 
@@ -82,18 +92,27 @@ export const FREQUENCY_LABEL = Object.fromEntries(FREQUENCIES.map((f) => [f.valu
 
 // ── 支出 ─────────────────────────────────────────────
 export type ExpenseCategory = "food" | "transport" | "housing" | "entertainment" | "medical" | "shopping" | "work" | "other";
-export const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string; icon: string; color: string }[] = [
-  { value: "food", label: "餐飲", icon: "🍜", color: "#f59e0b" },
-  { value: "transport", label: "交通", icon: "🚗", color: "#3b82f6" },
-  { value: "housing", label: "住房水電", icon: "🏠", color: "#8b5cf6" },
-  { value: "entertainment", label: "娛樂", icon: "🎮", color: "#ec4899" },
-  { value: "medical", label: "醫療健康", icon: "🏥", color: "#10b981" },
-  { value: "shopping", label: "購物", icon: "🛍️", color: "#f97316" },
-  { value: "work", label: "工作相關", icon: "💼", color: "#64748b" },
-  { value: "other", label: "其他", icon: "📦", color: "#94a3b8" },
+/**
+ * 每個分類有兩種顏色:
+ * - tint  粉彩,用於介面上的圓形氣泡(Money+ 的低彩度調性)
+ * - color 同色系的深版,只給圖表線條用——8 條粉彩線在白底上會糊成一片
+ */
+export const EXPENSE_CATEGORIES: {
+  value: ExpenseCategory; label: string; icon: string; tint: string; color: string;
+}[] = [
+  { value: "food", label: "餐飲", icon: "🍜", tint: "bg-p-peach", color: "#e8814a" },
+  { value: "transport", label: "交通", icon: "🚗", tint: "bg-p-sky", color: "#5a93d4" },
+  { value: "housing", label: "住房水電", icon: "🏠", tint: "bg-p-lilac", color: "#8b72d9" },
+  { value: "entertainment", label: "娛樂", icon: "🎮", tint: "bg-p-rose", color: "#db6e95" },
+  { value: "medical", label: "醫療健康", icon: "🏥", tint: "bg-p-mint", color: "#45a87e" },
+  { value: "shopping", label: "購物", icon: "🛍️", tint: "bg-p-butter", color: "#d0a02e" },
+  { value: "work", label: "工作相關", icon: "💼", tint: "bg-p-sage", color: "#7f9e4f" },
+  { value: "other", label: "其他", icon: "📦", tint: "bg-p-stone", color: "#9a93a3" },
 ];
 export const EXPENSE_CATEGORY_LABEL = Object.fromEntries(EXPENSE_CATEGORIES.map((c) => [c.value, c.label])) as Record<ExpenseCategory, string>;
 export const EXPENSE_CATEGORY_COLOR = Object.fromEntries(EXPENSE_CATEGORIES.map((c) => [c.value, c.color])) as Record<ExpenseCategory, string>;
+export const EXPENSE_CATEGORY_TINT = Object.fromEntries(EXPENSE_CATEGORIES.map((c) => [c.value, c.tint])) as Record<ExpenseCategory, string>;
+export const EXPENSE_CATEGORY_ICON = Object.fromEntries(EXPENSE_CATEGORIES.map((c) => [c.value, c.icon])) as Record<ExpenseCategory, string>;
 
 // ── 資料列型別 ────────────────────────────────────────
 export type Asset = {

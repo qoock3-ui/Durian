@@ -1,11 +1,75 @@
 @import "tailwindcss";
 
+/*
+ * FinTrack 設計語彙 — Daak記帳 × Money+
+ * Daak 給結構(粗描邊、零陰影、圓形氣泡圖示)
+ * Money+ 給色溫(粉彩、大圓角、低對比)
+ */
 @theme {
-  --color-sidebar: #0f172a;
-  --color-sidebar-active: #2563eb;
+  /* ── 底層 ─────────────────────────── */
+  --color-ink: #2e2733; /* 描邊與主文字,帶紫的墨黑 */
+  --color-ink-2: #6b6274; /* 次要文字 */
+  --color-ink-3: #9a93a3; /* 輔助文字 */
+  --color-paper: #fbfafc; /* 頁面底色 */
+  --color-card: #ffffff;
+  --color-line-soft: #e7e3ec; /* 分隔線,不用於卡片外框 */
+
+  /* ── 行動色(只給可按的東西)────────── */
+  --color-mango: #ff9a3c;
+  --color-mango-d: #e07b1e;
+  --color-lilac: #a896e8;
+
+  /* ── 語意色 ───────────────────────── */
+  --color-income: #4fb58b;
+  --color-expense: #f0803c;
+  --color-danger: #d9556b;
+
+  /* ── 分類粉彩盤(氣泡底色)──────────── */
+  --color-p-peach: #ffd6bc;
+  --color-p-sky: #c4dcf6;
+  --color-p-lilac: #ded5f8;
+  --color-p-rose: #f9ceda;
+  --color-p-mint: #bce7d3;
+  --color-p-butter: #fbe8ac;
+  --color-p-sage: #dae7c2;
+  --color-p-stone: #e5e2e8;
+
+  /* ── 字體 ─────────────────────────── */
+  /* 圓體在 macOS/iOS 有 Yuanti TC 與 Hiragino Maru Gothic,
+     其餘平台優雅退回系統黑體 */
+  --font-round: "Yuanti TC", "Yuanti SC", "Hiragino Maru Gothic ProN",
+    "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC",
+    "Microsoft JhengHei", "Helvetica Neue", sans-serif;
+
+  /* ── 圓角 ─────────────────────────── */
+  --radius-card: 24px;
+  --radius-mid: 16px;
 }
 
 body {
-  @apply bg-slate-100 text-slate-800;
-  font-family: "Noto Sans TC", ui-sans-serif, system-ui, sans-serif;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 金額一律等寬對齊 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 鍵盤操作可見焦點 */
+:focus-visible {
+  outline: 2px solid var(--color-mango-d);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

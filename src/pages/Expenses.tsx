@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { del, post, put } from "../api";
 import { useStore } from "../store";
-import { Card, EmptyState, PrimaryButton, RegionBadge, RegionTabs, RowActions } from "../components/ui";
+import { Bubble, Card, EmptyState, MonthNav, PrimaryButton, RegionBadge, RegionTabs, RowActions } from "../components/ui";
 import FormModal from "../components/FormModal";
 import { EXPENSE_FIELDS } from "../components/entityForms";
 import { EXPENSE_CATEGORIES, type Expense, type Region } from "../lib/constants";
-import { currentMonthKey, expensesInMonth, fmt, fmtTWD, toTWD } from "../lib/finance";
+import { currentMonthKey, expensesInMonth, fmt, fmtTWD, toTWD, totalExpenseTWD } from "../lib/finance";
 
 export function shiftMonth(ym: string, delta: number): string {
   const [y, m] = ym.split("-").map(Number);
@@ -13,44 +13,89 @@ export function shiftMonth(ym: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+const catOf = (v: string) => EXPENSE_CATEGORIES.find((c) => c.value === v);
+
+/** 單筆花費列。不給 onEdit/onDelete 時不顯示操作鈕(總覽的最近交易用)。 */
+export function ExpenseRow({
+  e,
+  rates,
+  onEdit,
+  onDelete,
+  showDate = true,
+}: {
+  e: Expense;
+  rates: Record<string, number>;
+  onEdit?: (e: Expense) => void;
+  onDelete?: (e: Expense) => void;
+  showDate?: boolean;
+}) {
+  const cat = catOf(e.category);
+  // 快速記帳留空名稱時會帶入分類名,此時副標不再重複一次分類
+  const sub = [showDate ? e.date : null, e.name === cat?.label ? null : cat?.label, e.note]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <li className="flex items-center gap-3 py-2.5">
+      <Bubble tint={cat?.tint}>{cat?.icon}</Bubble>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="truncate font-medium">{e.name}</span>
+          <RegionBadge region={e.region} />
+        </div>
+        <div className="truncate text-xs text-ink-3">{sub || " "}</div>
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="tnum font-round text-sm font-bold sm:text-base">{fmt(e.amount, e.currency)}</div>
+        {e.currency !== "TWD" && (
+          <div className="tnum text-xs text-ink-3">≈ {fmtTWD(toTWD(e.amount, e.currency, rates))}</div>
+        )}
+      </div>
+      {onEdit && onDelete && <RowActions onEdit={() => onEdit(e)} onDelete={() => onDelete(e)} />}
+    </li>
+  );
+}
+
 export function ExpenseList({
   items,
   rates,
   onEdit,
   onDelete,
+  showDate = true,
 }: {
   items: Expense[];
   rates: Record<string, number>;
-  onEdit: (e: Expense) => void;
-  onDelete: (e: Expense) => void;
+  onEdit?: (e: Expense) => void;
+  onDelete?: (e: Expense) => void;
+  showDate?: boolean;
 }) {
-  const catOf = (v: string) => EXPENSE_CATEGORIES.find((c) => c.value === v);
   return (
-    <ul className="divide-y divide-slate-100">
+    <ul className="divide-y-2 divide-line-soft">
       {items.map((e) => (
-        <li key={e.id} className="flex items-center gap-3 py-2.5">
-          <span className="text-xl">{catOf(e.category)?.icon}</span>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="truncate font-medium">{e.name}</span>
-              <RegionBadge region={e.region} />
-            </div>
-            <div className="text-xs text-slate-400">
-              {e.date} · {catOf(e.category)?.label}
-              {e.note ? ` · ${e.note}` : ""}
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-lg font-semibold md:text-base">{fmt(e.amount, e.currency)}</div>
-            {e.currency !== "TWD" && (
-              <div className="text-xs text-slate-400">≈ {fmtTWD(toTWD(e.amount, e.currency, rates))}</div>
-            )}
-          </div>
-          <RowActions onEdit={() => onEdit(e)} onDelete={() => onDelete(e)} />
-        </li>
+        <ExpenseRow key={e.id} e={e} rates={rates} onEdit={onEdit} onDelete={onDelete} showDate={showDate} />
       ))}
     </ul>
   );
+}
+
+/** 依日期由新到舊分組,每組顯示當日小計 */
+function groupByDay(items: Expense[]): { date: string; items: Expense[] }[] {
+  const map = new Map<string, Expense[]>();
+  for (const e of items) {
+    const list = map.get(e.date);
+    if (list) list.push(e);
+    else map.set(e.date, [e]);
+  }
+  return [...map.entries()]
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .map(([date, list]) => ({ date, items: list }));
+}
+
+const WEEKDAY = ["日", "一", "二", "三", "四", "五", "六"];
+
+function dayLabel(date: string, today: string): string {
+  const [, m, d] = date.split("-").map(Number);
+  const w = WEEKDAY[new Date(date + "T00:00:00").getDay()];
+  return `${m} 月 ${d} 日 · 週${w}${date === today ? " · 今天" : ""}`;
 }
 
 export default function Expenses() {
@@ -63,6 +108,9 @@ export default function Expenses() {
     const inMonth = expensesInMonth(expenses, month);
     return tab === "ALL" ? inMonth : inMonth.filter((e) => e.region === tab);
   }, [expenses, month, tab]);
+
+  const days = useMemo(() => groupByDay(monthItems), [monthItems]);
+  const monthTotal = totalExpenseTWD(monthItems, rates.rates);
 
   const save = async (values: Record<string, unknown>) => {
     if (editing === "new") await post("/api/expenses", values);
@@ -77,32 +125,55 @@ export default function Expenses() {
   };
 
   const [y, m] = month.split("-");
+  const today = new Date().toISOString().slice(0, 10);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">花費</h1>
-        <PrimaryButton onClick={() => setEditing("new")}>+ 新增花費</PrimaryButton>
+        <h1 className="font-round text-2xl font-bold">花費</h1>
+        <PrimaryButton onClick={() => setEditing("new")}>＋ 新增花費</PrimaryButton>
       </div>
 
-      <div className="flex items-center justify-center gap-4">
-        <button onClick={() => setMonth(shiftMonth(month, -1))} className="rounded-lg px-3 py-1 text-xl hover:bg-slate-200 md:text-lg">‹</button>
-        <span className="text-xl font-semibold md:text-lg">{y}年{Number(m)}月</span>
-        <button onClick={() => setMonth(shiftMonth(month, 1))} className="rounded-lg px-3 py-1 text-xl hover:bg-slate-200 md:text-lg">›</button>
-      </div>
+      <MonthNav
+        label={`${y} 年 ${Number(m)} 月`}
+        onPrev={() => setMonth(shiftMonth(month, -1))}
+        onNext={() => setMonth(shiftMonth(month, 1))}
+      />
 
-      <RegionTabs regions={["ALL", "TW", "VN", "OTHER"]} value={tab} onChange={setTab} />
+      <Card tint="bg-p-butter">
+        <p className="text-sm text-ink-2">本月支出合計</p>
+        <p className="tnum mt-1 font-round text-3xl font-bold">{fmtTWD(monthTotal)}</p>
+        <p className="tnum mt-1 text-xs text-ink-2">共 {monthItems.length} 筆</p>
+      </Card>
 
-      <Card>
-        {monthItems.length === 0 ? (
+      <RegionTabs regions={["ALL", "TW", "VN", "US", "OTHER"]} value={tab} onChange={setTab} />
+
+      {days.length === 0 ? (
+        <Card>
           <EmptyState
-            text={`${Number(m)}月尚無花費記錄`}
+            text={`${Number(m)} 月尚無花費記錄`}
             action={<PrimaryButton onClick={() => setEditing("new")}>記一筆</PrimaryButton>}
           />
-        ) : (
-          <ExpenseList items={monthItems} rates={rates.rates} onEdit={setEditing} onDelete={remove} />
-        )}
-      </Card>
+        </Card>
+      ) : (
+        days.map((day) => (
+          <Card key={day.date}>
+            <div className="flex items-baseline justify-between border-b-2 border-dashed border-line-soft pb-2">
+              <span className="font-round text-sm font-bold">{dayLabel(day.date, today)}</span>
+              <span className="tnum text-xs text-ink-3">
+                {fmtTWD(totalExpenseTWD(day.items, rates.rates))}
+              </span>
+            </div>
+            <ExpenseList
+              items={day.items}
+              rates={rates.rates}
+              onEdit={setEditing}
+              onDelete={remove}
+              showDate={false}
+            />
+          </Card>
+        ))
+      )}
 
       {editing && (
         <FormModal
