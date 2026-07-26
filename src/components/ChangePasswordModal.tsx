@@ -6,12 +6,20 @@ import Mascot from "./Mascot";
 export default function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // 打錯一個字就再也登不進來,所以在送出前先比對兩次輸入
+  const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setError("兩次輸入的新密碼不一致");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -55,10 +63,22 @@ export default function ChangePasswordModal({ onClose }: { onClose: () => void }
               minLength={8}
             />
           </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-ink-2">再輸入一次新密碼</span>
+            <input
+              className={`${inputClass} ${mismatch ? "border-danger" : ""}`}
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+            {mismatch && <span className="mt-1 block text-xs text-danger">兩次輸入不一致</span>}
+          </label>
           {error && <p className="text-sm text-danger">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <GhostButton onClick={onClose}>取消</GhostButton>
-            <PrimaryButton type="submit" disabled={busy}>
+            <PrimaryButton type="submit" disabled={busy || mismatch}>
               {busy ? "處理中…" : "確認修改"}
             </PrimaryButton>
           </div>

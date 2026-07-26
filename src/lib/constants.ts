@@ -87,4 +87,4 @@ export type Expense = {
   amount: number; currency: Currency; date: string; note: string | null;
 };
 export type Rates = { rates: Record<string, number>; updated_at: string | null };
-export type User = { id: number; email: string; name: string };
+export type User = { id: number; email: string; name: string; is_admin?: boolean };

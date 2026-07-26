@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext, Env } from "./env";
-import { authRoutes, requireAuth } from "./auth";
+import { authRoutes, computeIsAdmin, requireAuth } from "./auth";
 import { categoryRoutes } from "./categories";
 import { crudRoutes } from "./crud";
 import { ratesRoutes, refreshRates } from "./rates";
@@ -14,9 +14,10 @@ app.use("/api/*", requireAuth);
 app.get("/api/me", async (c) => {
   const user = await c.env.DB.prepare("SELECT id, email, name FROM users WHERE id = ?")
     .bind(c.get("userId"))
-    .first();
+    .first<{ id: number; email: string; name: string }>();
   if (!user) return c.json({ error: "unauthorized" }, 401);
-  return c.json(user);
+  // 前端據此決定要不要顯示「核發臨時密碼」,實際權限仍由後端再驗一次
+  return c.json({ ...user, is_admin: computeIsAdmin(c.env, user.email) });
 });
 
 app.route("/api/categories", categoryRoutes);

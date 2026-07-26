@@ -4,6 +4,7 @@ import { post } from "../api";
 import { useStore } from "../store";
 import ChangePasswordModal from "./ChangePasswordModal";
 import CategoryManager from "./CategoryManager";
+import TempPasswordModal from "./TempPasswordModal";
 import QuickAdd from "./QuickAdd";
 import FormModal from "./FormModal";
 import Mascot from "./Mascot";
@@ -50,6 +51,7 @@ export default function Layout() {
   const initial = user?.name?.[0]?.toUpperCase() ?? "?";
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
+  const [showTempPassword, setShowTempPassword] = useState(false);
   const [adding, setAdding] = useState<"asset" | "income" | "expense" | null>(null);
   const [toast, setToast] = useState("");
 
@@ -113,6 +115,11 @@ export default function Layout() {
           <button onClick={() => setShowChangePassword(true)} className={`mt-2 ${smallButton}`}>
             修改密碼
           </button>
+          {user?.is_admin && (
+            <button onClick={() => setShowTempPassword(true)} className={`mt-2 ${smallButton}`}>
+              核發臨時密碼
+            </button>
+          )}
           <button onClick={logout} className={`mt-2 ${smallButton}`}>
             登出
           </button>
@@ -138,6 +145,14 @@ export default function Layout() {
           >
             密碼
           </button>
+          {user?.is_admin && (
+            <button
+              onClick={() => setShowTempPassword(true)}
+              className="rounded-full border-2 border-line-soft px-2.5 py-1 text-xs text-ink-2"
+            >
+              核發
+            </button>
+          )}
           <button
             onClick={logout}
             className="rounded-full border-2 border-line-soft px-2.5 py-1 text-xs text-ink-2"
@@ -220,6 +235,7 @@ export default function Layout() {
       )}
       {toast && <Toast text={toast} onDone={() => setToast("")} />}
       {showCategories && <CategoryManager onClose={() => setShowCategories(false)} />}
+      {showTempPassword && <TempPasswordModal onClose={() => setShowTempPassword(false)} />}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
     </div>
   );
