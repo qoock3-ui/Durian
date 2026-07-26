@@ -1,14 +1,10 @@
-import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { post } from "../api";
+import { useState } from "react";
+import { NavLink, Outlet } from "react-router-dom";
 import { useStore } from "../store";
 import ChangePasswordModal from "./ChangePasswordModal";
 import CategoryManager from "./CategoryManager";
 import TempPasswordModal from "./TempPasswordModal";
-import QuickAdd from "./QuickAdd";
-import FormModal from "./FormModal";
 import Mascot from "./Mascot";
-import { assetFields, incomeFields } from "./entityForms";
 
 const NAV = [
   { to: "/", label: "總覽", icon: "🏠" },
@@ -18,56 +14,12 @@ const NAV = [
   { to: "/trends", label: "趨勢", icon: "📈" },
 ];
 
-/** 浮動按鈕在哪一頁就新增哪一種東西,而不是一律開支出面板 */
-function addTargetFor(pathname: string): "asset" | "income" | "expense" {
-  if (pathname.startsWith("/assets")) return "asset";
-  if (pathname.startsWith("/incomes")) return "income";
-  return "expense";
-}
-
-const TARGET_LABEL = { asset: "新增資產", income: "新增收入", expense: "記一筆" } as const;
-
-function Toast({ text, onDone }: { text: string; onDone: () => void }) {
-  useEffect(() => {
-    const t = setTimeout(onDone, 3200);
-    return () => clearTimeout(t);
-  }, [onDone]);
-  return (
-    <div
-      role="status"
-      className="pointer-events-none fixed inset-x-0 bottom-24 z-40 flex justify-center px-4 md:bottom-8"
-    >
-      <div className="flex items-center gap-2 rounded-full border-2 border-ink bg-p-mint px-4 py-2 text-sm font-medium">
-        <Mascot size={24} mood="cheer" />
-        {text}
-      </div>
-    </div>
-  );
-}
-
 export default function Layout() {
-  const { user, logout, refresh, cats } = useStore();
-  const { pathname } = useLocation();
+  const { user, logout } = useStore();
   const initial = user?.name?.[0]?.toUpperCase() ?? "?";
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const [showTempPassword, setShowTempPassword] = useState(false);
-  const [adding, setAdding] = useState<"asset" | "income" | "expense" | null>(null);
-  const [toast, setToast] = useState("");
-
-  const target = addTargetFor(pathname);
-
-  const saveEntity = async (values: Record<string, unknown>) => {
-    if (adding === "asset") {
-      await post("/api/assets", values);
-      await refresh("assets");
-      setToast("已新增資產");
-    } else if (adding === "income") {
-      await post("/api/incomes", values);
-      await refresh("incomes");
-      setToast("已新增收入");
-    }
-  };
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-3 rounded-full border-2 px-3 py-2 text-sm font-medium transition ${
@@ -76,6 +28,7 @@ export default function Layout() {
 
   const smallButton =
     "w-full rounded-full border-2 border-line-soft py-1.5 text-xs text-ink-2 transition hover:border-ink hover:text-ink";
+  const chipButton = "rounded-full border-2 border-line-soft px-2.5 py-1 text-xs text-ink-2";
 
   return (
     <div className="min-h-screen md:flex">
@@ -92,12 +45,6 @@ export default function Layout() {
               {item.label}
             </NavLink>
           ))}
-          <button
-            onClick={() => setAdding(target)}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-full border-2 border-ink bg-mango px-3 py-2 font-round text-sm font-bold transition hover:bg-mango-d"
-          >
-            ＋ {TARGET_LABEL[target]}
-          </button>
         </nav>
         <div className="border-t-2 border-ink p-4">
           <div className="flex items-center gap-3">
@@ -133,49 +80,27 @@ export default function Layout() {
           <span className="font-round text-lg font-bold">FinTrack</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => setShowCategories(true)}
-            className="rounded-full border-2 border-line-soft px-2.5 py-1 text-xs text-ink-2"
-          >
+          <button onClick={() => setShowCategories(true)} className={chipButton}>
             分類
           </button>
-          <button
-            onClick={() => setShowChangePassword(true)}
-            className="rounded-full border-2 border-line-soft px-2.5 py-1 text-xs text-ink-2"
-          >
+          <button onClick={() => setShowChangePassword(true)} className={chipButton}>
             密碼
           </button>
           {user?.is_admin && (
-            <button
-              onClick={() => setShowTempPassword(true)}
-              className="rounded-full border-2 border-line-soft px-2.5 py-1 text-xs text-ink-2"
-            >
+            <button onClick={() => setShowTempPassword(true)} className={chipButton}>
               核發
             </button>
           )}
-          <button
-            onClick={logout}
-            className="rounded-full border-2 border-line-soft px-2.5 py-1 text-xs text-ink-2"
-          >
+          <button onClick={logout} className={chipButton}>
             登出
           </button>
         </div>
       </header>
 
-      {/* pb 需同時清開底部分頁與其上方的浮動按鈕 */}
-      <main className="flex-1 overflow-x-hidden p-4 pb-40 md:p-6 md:pb-6 lg:p-8">
+      {/* 沒有浮動按鈕了,pb 只需清開底部分頁 */}
+      <main className="flex-1 overflow-x-hidden p-4 pb-24 md:p-6 md:pb-6 lg:p-8">
         <Outlet />
       </main>
-
-      {/* 手機浮動新增鈕:依目前頁面決定新增什麼 */}
-      <button
-        onClick={() => setAdding(target)}
-        aria-label={TARGET_LABEL[target]}
-        className="fixed right-4 z-30 grid h-14 w-14 place-items-center rounded-full border-2 border-ink bg-mango font-round text-2xl font-bold text-ink transition active:bg-mango-d md:hidden"
-        style={{ bottom: "calc(4.75rem + env(safe-area-inset-bottom))" }}
-      >
-        ＋
-      </button>
 
       {/* 手機底部分頁 */}
       <nav
@@ -209,31 +134,6 @@ export default function Layout() {
         ))}
       </nav>
 
-      {adding === "expense" && <QuickAdd onClose={() => setAdding(null)} onSaved={setToast} />}
-      {adding === "asset" && (
-        <FormModal
-          title="新增資產"
-          fields={assetFields(cats)}
-          initial={{ currency: "TWD", region: "TW", category: cats.list("asset")[0]?.key ?? "" }}
-          onSubmit={saveEntity}
-          onClose={() => setAdding(null)}
-        />
-      )}
-      {adding === "income" && (
-        <FormModal
-          title="新增收入"
-          fields={incomeFields(cats)}
-          initial={{
-            currency: "TWD",
-            region: "TW",
-            frequency: "monthly",
-            type: cats.list("income")[0]?.key ?? "",
-          }}
-          onSubmit={saveEntity}
-          onClose={() => setAdding(null)}
-        />
-      )}
-      {toast && <Toast text={toast} onDone={() => setToast("")} />}
       {showCategories && <CategoryManager onClose={() => setShowCategories(false)} />}
       {showTempPassword && <TempPasswordModal onClose={() => setShowTempPassword(false)} />}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}

@@ -1,19 +1,27 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { del, post, put } from "../api";
 import { useStore } from "../store";
-import { Badge, Bubble, Card, EmptyState, PrimaryButton, RegionBadge, RowActions } from "../components/ui";
+import { Bubble, Card, EmptyState, PrimaryButton, RegionBadge, RegionTabs, RowActions } from "../components/ui";
 import FormModal from "../components/FormModal";
 import { incomeFields } from "../components/entityForms";
-import { FREQUENCY_LABEL, type Income } from "../lib/constants";
-import { fmt, fmtTWD, monthlyAmount, totalMonthlyIncomeTWD } from "../lib/finance";
+import { FREQUENCY_LABEL, REGION_FLAG, type Income, type Region } from "../lib/constants";
+import { fmt, fmtTWD, monthlyAmount, toTWD, totalMonthlyIncomeTWD } from "../lib/finance";
 
 export default function Incomes() {
   const { incomes, rates, refresh, cats } = useStore();
+  const [tab, setTab] = useState<Region | "ALL">("ALL");
   const [editing, setEditing] = useState<Income | "new" | null>(null);
 
-  const monthlyByCur = (cur: string) =>
-    incomes.filter((i) => i.currency === cur).reduce((s, i) => s + monthlyAmount(i), 0);
-  const monthlyTotal = totalMonthlyIncomeTWD(incomes, rates.rates);
+  const rateMap = rates.rates;
+  const filtered = useMemo(() => (tab === "ALL" ? incomes : incomes.filter((i) => i.region === tab)), [incomes, tab]);
+
+  const monthlyTotal = totalMonthlyIncomeTWD(incomes, rateMap);
+  const byRegion = (["TW", "VN", "US"] as Region[]).map((r) => ({
+    region: r,
+    twd: incomes
+      .filter((i) => i.region === r)
+      .reduce((s, i) => s + toTWD(monthlyAmount(i), i.currency, rateMap), 0),
+  }));
 
   const save = async (values: Record<string, unknown>) => {
     if (editing === "new") await post("/api/incomes", values);
@@ -35,62 +43,64 @@ export default function Incomes() {
       </div>
 
       <Card tint="bg-p-mint">
-        <p className="text-sm text-ink-2">月均收入合計(TWD)</p>
+        <p className="text-sm text-ink-2">月均收入合計</p>
         <p className="tnum mt-1 font-round text-3xl font-bold">{fmtTWD(monthlyTotal)}</p>
-        <p className="tnum mt-1 text-xs text-ink-2">年約 {fmtTWD(monthlyTotal * 12)}</p>
+        <p className="tnum mt-1 text-xs text-ink-2">
+          年約 {fmtTWD(monthlyTotal * 12)} · 共 {incomes.length} 筆
+        </p>
+        {/* 地區明細一律換算成 TWD,才能並排比較 */}
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 border-t-2 border-dashed border-ink/15 pt-2 text-xs text-ink-2">
+          {byRegion.map(({ region, twd }) => (
+            <span key={region} className="tnum">
+              {REGION_FLAG[region]} {fmtTWD(twd)}
+            </span>
+          ))}
+        </div>
       </Card>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        {(["TWD", "VND"] as const).map((cur) => {
-          const monthly = monthlyByCur(cur);
-          return (
-            <Card key={cur}>
-              <p className="text-sm text-ink-2">月均收入({cur})</p>
-              <p className="tnum mt-1 font-round text-xl font-bold">{fmt(monthly, cur)}</p>
-              <p className="tnum mt-1 text-xs text-ink-3">年約 {fmt(monthly * 12, cur)}</p>
-            </Card>
-          );
-        })}
-      </div>
+      <RegionTabs regions={["ALL", "TW", "VN", "US", "OTHER"]} value={tab} onChange={setTab} />
 
-      {incomes.length === 0 ? (
+      {filtered.length === 0 ? (
         <Card>
           <EmptyState
-            text="尚無收入資料"
+            text={tab === "ALL" ? "尚無收入資料" : "這個地區還沒有收入"}
             action={<PrimaryButton onClick={() => setEditing("new")}>新增第一筆收入</PrimaryButton>}
           />
         </Card>
       ) : (
         cats.groups("income").map((group) => {
-          const items = incomes.filter((i) => group.items.some((c) => c.key === i.type));
+          const items = filtered.filter((i) => group.items.some((c) => c.key === i.type));
           if (items.length === 0) return null;
+          const subtotal = items.reduce((s, i) => s + toTWD(monthlyAmount(i), i.currency, rateMap), 0);
           return (
             <Card key={group.group}>
-              <div className="mb-2 flex items-center gap-3">
-                <Bubble tint={group.items[0].tint} size="sm">
-                  {group.items[0].icon}
-                </Bubble>
-                <h2 className="font-round font-bold">{group.group}</h2>
+              <div className="flex items-center justify-between border-b-2 border-dashed border-line-soft pb-2">
+                <span className="font-round text-sm font-bold">
+                  {group.items[0].icon} {group.group}
+                </span>
+                <span className="tnum text-xs text-ink-3">月均 {fmtTWD(subtotal)}</span>
               </div>
               <ul className="divide-y-2 divide-line-soft">
                 {items.map((i) => (
-                  <li key={i.id} className="flex items-center gap-3 py-2.5">
+                  <li key={i.id} className="flex items-center gap-2 py-2.5 sm:gap-3">
                     <Bubble tint={cats.tint("income", i.type)} size="sm">
                       {cats.icon("income", i.type)}
                     </Bubble>
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="flex items-center gap-1.5">
                         <span className="truncate font-medium">{i.name}</span>
                         <RegionBadge region={i.region} />
-                        <Badge className="bg-p-mint">{FREQUENCY_LABEL[i.frequency]}</Badge>
                       </div>
+                      {/* 頻率放副標,不跟名稱搶標題列的寬度 */}
                       <div className="truncate text-xs text-ink-3">
-                        {cats.label("income", i.type)}
+                        {FREQUENCY_LABEL[i.frequency]} · {cats.label("income", i.type)}
                         {i.note ? ` · ${i.note}` : ""}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="tnum font-round text-base font-bold">{fmt(i.amount, i.currency)}</div>
+                    <div className="shrink-0 text-right">
+                      <div className="tnum font-round text-xs font-bold sm:text-base">
+                        {fmt(i.amount, i.currency)}
+                      </div>
                       {i.frequency === "yearly" && (
                         <div className="tnum text-xs text-ink-3">月均 {fmt(i.amount / 12, i.currency)}</div>
                       )}

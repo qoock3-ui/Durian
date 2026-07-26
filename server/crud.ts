@@ -77,18 +77,29 @@ function validate(fields: FieldSpec[], body: Record<string, unknown>): { values:
   return { values };
 }
 
-/** 分類是動態的,得回資料庫確認這個 key 屬於該使用者 */
+/**
+ * 分類是動態的,得回資料庫確認這個 key 屬於該使用者。
+ *
+ * 查不到才補種一次再判——ensureCategories 現在是補齊差集,
+ * 每次寫入都跑會白白多出幾十筆 no-op。正常路徑上分類早就存在了。
+ */
 async function checkCategories(
   db: D1Database,
   userId: number,
   fields: FieldSpec[],
   values: unknown[],
 ): Promise<string | null> {
-  await ensureCategories(db, userId);
+  let seeded = false;
   for (let i = 0; i < fields.length; i++) {
     const f = fields[i];
     if (f.kind !== "category") continue;
-    const ok = await categoryExists(db, userId, f.categoryKind!, values[i] as string);
+    const key = values[i] as string;
+    let ok = await categoryExists(db, userId, f.categoryKind!, key);
+    if (!ok && !seeded) {
+      await ensureCategories(db, userId);
+      seeded = true;
+      ok = await categoryExists(db, userId, f.categoryKind!, key);
+    }
     if (!ok) return `${f.name} 值不合法`;
   }
   return null;

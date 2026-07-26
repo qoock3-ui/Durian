@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { del, post, put } from "../api";
+import { del, put } from "../api";
 import { useStore } from "../store";
-import { Bubble, Card, EmptyState, MonthNav, PrimaryButton, RegionBadge, RegionTabs, RowActions } from "../components/ui";
+import { Bubble, Card, EmptyState, MonthNav, PrimaryButton, RegionBadge, RegionTabs, RowActions, Toast } from "../components/ui";
 import FormModal from "../components/FormModal";
+import QuickAdd from "../components/QuickAdd";
 import { expenseFields } from "../components/entityForms";
 import { type Expense, type Region } from "../lib/constants";
 import { currentMonthKey, expensesInMonth, fmt, fmtTWD, toTWD, totalExpenseTWD } from "../lib/finance";
@@ -101,7 +102,10 @@ export default function Expenses() {
   const { expenses, rates, refresh, cats } = useStore();
   const [month, setMonth] = useState(currentMonthKey());
   const [tab, setTab] = useState<Region | "ALL">("ALL");
-  const [editing, setEditing] = useState<Expense | "new" | null>(null);
+  // 新增走計算機面板(快),編輯走完整表單(需要改日期、地區、備註)
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Expense | null>(null);
+  const [toast, setToast] = useState("");
 
   const monthItems = useMemo(() => {
     const inMonth = expensesInMonth(expenses, month);
@@ -112,8 +116,8 @@ export default function Expenses() {
   const monthTotal = totalExpenseTWD(monthItems, rates.rates);
 
   const save = async (values: Record<string, unknown>) => {
-    if (editing === "new") await post("/api/expenses", values);
-    else if (editing) await put(`/api/expenses/${editing.id}`, values);
+    if (!editing) return;
+    await put(`/api/expenses/${editing.id}`, values);
     await refresh("expenses");
   };
 
@@ -130,7 +134,7 @@ export default function Expenses() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-round text-2xl font-bold">花費</h1>
-        <PrimaryButton onClick={() => setEditing("new")}>＋ 新增花費</PrimaryButton>
+        <PrimaryButton onClick={() => setAdding(true)}>＋ 新增花費</PrimaryButton>
       </div>
 
       <MonthNav
@@ -151,7 +155,7 @@ export default function Expenses() {
         <Card>
           <EmptyState
             text={`${Number(m)} 月尚無花費記錄`}
-            action={<PrimaryButton onClick={() => setEditing("new")}>記一筆</PrimaryButton>}
+            action={<PrimaryButton onClick={() => setAdding(true)}>記一筆</PrimaryButton>}
           />
         </Card>
       ) : (
@@ -174,24 +178,19 @@ export default function Expenses() {
         ))
       )}
 
+      {adding && <QuickAdd onClose={() => setAdding(false)} onSaved={setToast} />}
+
       {editing && (
         <FormModal
-          title={editing === "new" ? "新增花費" : "編輯花費"}
+          title="編輯花費"
           fields={expenseFields(cats)}
-          initial={
-            editing === "new"
-              ? {
-                  currency: "TWD",
-                  region: "TW",
-                  category: cats.list("expense")[0]?.key ?? "",
-                  date: new Date().toISOString().slice(0, 10),
-                }
-              : editing
-          }
+          initial={editing}
           onSubmit={save}
           onClose={() => setEditing(null)}
         />
       )}
+
+      {toast && <Toast text={toast} onDone={() => setToast("")} />}
     </div>
   );
 }

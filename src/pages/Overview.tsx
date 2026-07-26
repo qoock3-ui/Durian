@@ -102,7 +102,7 @@ export default function Overview() {
           </Link>
         </div>
         {recent.length === 0 ? (
-          <EmptyState text="還沒有任何記錄 — 按右下角的 ＋ 記第一筆" />
+          <EmptyState text="還沒有任何記錄 — 到「花費」頁記第一筆" />
         ) : (
           <ExpenseList items={recent} rates={rateMap} />
         )}

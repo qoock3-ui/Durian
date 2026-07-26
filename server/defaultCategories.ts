@@ -82,13 +82,29 @@ export const DEFAULT_INCOME_CATEGORIES: DefaultCategory[] = [
   { key: "other", group: "補助與其他所得", label: "其他收入", icon: "✨", tint: "bg-p-butter" },
 ];
 
+/**
+ * 排列順序即 sort 值。「其他」刻意放在最後,前面依日常使用頻率排。
+ * key 全部沿用,只是位置調整——sort 不開放使用者編輯,所以補種時
+ * 可以安全地一併校正,新舊帳號看到的順序才會一致。
+ */
 export const DEFAULT_EXPENSE_CATEGORIES: DefaultCategory[] = [
   { key: "food", group: "支出", label: "餐飲", icon: "🍜", tint: "bg-p-peach" },
+  { key: "daily", group: "支出", label: "日用品", icon: "🧴", tint: "bg-p-mint" },
   { key: "transport", group: "支出", label: "交通", icon: "🚗", tint: "bg-p-sky" },
+  { key: "telecom", group: "支出", label: "通信", icon: "📱", tint: "bg-p-sky" },
   { key: "housing", group: "支出", label: "住房水電", icon: "🏠", tint: "bg-p-lilac" },
-  { key: "entertainment", group: "支出", label: "娛樂", icon: "🎮", tint: "bg-p-rose" },
-  { key: "medical", group: "支出", label: "醫療健康", icon: "🏥", tint: "bg-p-mint" },
   { key: "shopping", group: "支出", label: "購物", icon: "🛍️", tint: "bg-p-butter" },
+  { key: "clothing", group: "支出", label: "服飾", icon: "👕", tint: "bg-p-rose" },
+  { key: "beauty", group: "支出", label: "美容", icon: "💇", tint: "bg-p-rose" },
+  { key: "entertainment", group: "支出", label: "娛樂", icon: "🎮", tint: "bg-p-rose" },
+  { key: "social", group: "支出", label: "社交", icon: "🥂", tint: "bg-p-peach" },
+  { key: "travel", group: "支出", label: "旅行", icon: "🏖️", tint: "bg-p-sky" },
+  { key: "gift", group: "支出", label: "禮物", icon: "🎁", tint: "bg-p-rose" },
+  { key: "medical", group: "支出", label: "醫療健康", icon: "🏥", tint: "bg-p-mint" },
+  { key: "education", group: "支出", label: "教育", icon: "🎓", tint: "bg-p-sage" },
+  { key: "baby", group: "支出", label: "寶寶", icon: "🍼", tint: "bg-p-butter" },
+  { key: "pet", group: "支出", label: "寵物", icon: "🐶", tint: "bg-p-butter" },
+  { key: "tax", group: "支出", label: "稅金", icon: "🧾", tint: "bg-p-stone" },
   { key: "work", group: "支出", label: "工作相關", icon: "💼", tint: "bg-p-sage" },
   { key: "other", group: "支出", label: "其他", icon: "📦", tint: "bg-p-stone" },
 ];
