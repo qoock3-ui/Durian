@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { del, post, put } from "../api";
+import { del, put } from "../api";
 import { useStore } from "../store";
-import { Bubble, Card, EmptyState, PrimaryButton, RegionBadge, RegionTabs, RowActions } from "../components/ui";
+import { Bubble, Card, EmptyState, PrimaryButton, RegionBadge, RegionTabs, RowActions, Toast } from "../components/ui";
 import FormModal from "../components/FormModal";
+import QuickEntry from "../components/QuickEntry";
 import CategoryManager from "../components/CategoryManager";
 import { assetFields } from "../components/entityForms";
 import { REGION_FLAG, type Asset, type Region } from "../lib/constants";
@@ -11,9 +12,12 @@ import { fmt, fmtTWD, netWorthTWD, toTWD } from "../lib/finance";
 export default function Assets() {
   const { assets, rates, refresh, cats } = useStore();
   const [tab, setTab] = useState<Region | "ALL">("ALL");
-  const [editing, setEditing] = useState<Asset | "new" | null>(null);
+  // 新增走計算機面板,編輯走完整表單
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Asset | null>(null);
   const [addingCategory, setAddingCategory] = useState(false);
   const [patch, setPatch] = useState<Record<string, string> | undefined>();
+  const [toast, setToast] = useState("");
 
   const rateMap = rates.rates;
   const filtered = useMemo(() => (tab === "ALL" ? assets : assets.filter((a) => a.region === tab)), [assets, tab]);
@@ -34,8 +38,8 @@ export default function Assets() {
   }));
 
   const save = async (values: Record<string, unknown>) => {
-    if (editing === "new") await post("/api/assets", values);
-    else if (editing) await put(`/api/assets/${editing.id}`, values);
+    if (!editing) return;
+    await put(`/api/assets/${editing.id}`, values);
     await refresh("assets");
   };
 
@@ -49,7 +53,7 @@ export default function Assets() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-round text-2xl font-bold">資產</h1>
-        <PrimaryButton onClick={() => setEditing("new")}>＋ 新增資產</PrimaryButton>
+        <PrimaryButton onClick={() => setAdding(true)}>＋ 新增資產</PrimaryButton>
       </div>
 
       <Card tint="bg-p-lilac">
@@ -75,7 +79,7 @@ export default function Assets() {
         <Card>
           <EmptyState
             text={tab === "ALL" ? "尚無資產資料" : "這個地區還沒有資產"}
-            action={<PrimaryButton onClick={() => setEditing("new")}>新增第一筆資產</PrimaryButton>}
+            action={<PrimaryButton onClick={() => setAdding(true)}>新增第一筆資產</PrimaryButton>}
           />
         </Card>
       ) : (
@@ -131,15 +135,13 @@ export default function Assets() {
         })
       )}
 
+      {adding && <QuickEntry kind="asset" onClose={() => setAdding(false)} onSaved={setToast} />}
+
       {editing && (
         <FormModal
-          title={editing === "new" ? "新增資產" : "編輯資產"}
+          title="編輯資產"
           fields={assetFields(cats, () => setAddingCategory(true))}
-          initial={
-            editing === "new"
-              ? { currency: "TWD", region: "TW", category: cats.list("asset")[0]?.key ?? "" }
-              : editing
-          }
+          initial={editing}
           patch={patch}
           onSubmit={save}
           onClose={() => {
@@ -157,6 +159,8 @@ export default function Assets() {
           onClose={() => setAddingCategory(false)}
         />
       )}
+
+      {toast && <Toast text={toast} onDone={() => setToast("")} />}
     </div>
   );
 }

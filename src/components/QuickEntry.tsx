@@ -4,8 +4,8 @@ import { useStore } from "../store";
 import { Bubble } from "./ui";
 import CategoryManager from "./CategoryManager";
 import {
-  CURRENCIES, REGION_CURRENCY, REGION_FLAG, REGION_LABEL, REGIONS,
-  type Currency, type Region,
+  CURRENCIES, FREQUENCIES, REGION_CURRENCY, REGION_FLAG, REGION_LABEL, REGIONS,
+  type CategoryKind, type Currency, type Frequency, type Region,
 } from "../lib/constants";
 import { fmtTWD, toTWD } from "../lib/finance";
 
@@ -30,19 +30,35 @@ function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+const SPEC = {
+  expense: { title: "記一筆花費", path: "/api/expenses", catField: "category", table: "expenses", verb: "已記錄" },
+  asset: { title: "新增資產", path: "/api/assets", catField: "category", table: "assets", verb: "已新增資產" },
+  income: { title: "新增收入", path: "/api/incomes", catField: "type", table: "incomes", verb: "已新增收入" },
+} as const;
+
 /**
- * 快速記帳:金額 → 分類 → 完成,三步。
- * 地區決定幣別,不必再選一次(帳戶模型上線後這排 chips 會換成帳戶)。
+ * 計算機式輸入面板,三種資料共用:金額 → 分類 → 完成。
+ *
+ * 差異只在中間那排 chips 與名稱欄位:
+ * - 花費有日期,名稱可留空(帶入分類名),因為一天要記好幾筆
+ * - 資產與收入的名稱是「台銀活存」「本薪」這種真正的識別,所以固定顯示
+ * - 收入多一排頻率
+ *
+ * 地區決定幣別,不必再選一次。
  */
-export default function QuickAdd({
+export default function QuickEntry({
+  kind,
   onClose,
   onSaved,
 }: {
+  kind: CategoryKind;
   onClose: () => void;
   onSaved: (message: string) => void;
 }) {
+  const spec = SPEC[kind];
   const { rates, refresh, cats } = useStore();
-  const options = cats.list("expense");
+  const options = cats.list(kind);
+  const namedEntity = kind !== "expense";
 
   const [entry, setEntry] = useState("");
   const [acc, setAcc] = useState<number | null>(null);
@@ -52,6 +68,7 @@ export default function QuickAdd({
   const [region, setRegion] = useState<Region>("TW");
   const [currency, setCurrency] = useState<Currency>("TWD");
   const [date, setDate] = useState(ymd(new Date()));
+  const [frequency, setFrequency] = useState<Frequency>("monthly");
   const [showDate, setShowDate] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [name, setName] = useState("");
@@ -117,19 +134,22 @@ export default function QuickAdd({
     }
     setBusy(true);
     setError("");
-    const label = cats.label("expense", category);
+    const label = cats.label(kind, category);
+    const body: Record<string, unknown> = {
+      name: name.trim() || label,
+      [spec.catField]: category,
+      region,
+      amount: total,
+      currency,
+      note: note.trim(),
+    };
+    if (kind === "expense") body.date = date;
+    if (kind === "income") body.frequency = frequency;
+
     try {
-      await post("/api/expenses", {
-        name: name.trim() || label,
-        category,
-        region,
-        amount: total,
-        currency,
-        date,
-        note: note.trim(),
-      });
-      await refresh("expenses");
-      onSaved(`已記錄 ${currency} ${Math.round(total).toLocaleString("zh-TW")} · ${label}`);
+      await post(spec.path, body);
+      await refresh(spec.table);
+      onSaved(`${spec.verb} ${currency} ${Math.round(total).toLocaleString("zh-TW")} · ${label}`);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -143,6 +163,7 @@ export default function QuickAdd({
     `rounded-full border-2 px-3 py-1 text-xs transition ${
       on ? "border-ink bg-p-butter font-bold text-ink" : "border-line-soft text-ink-2 hover:border-ink"
     }`;
+  const textInput = "w-full rounded-mid border-2 border-ink bg-card px-3 py-2 text-sm";
 
   return (
     <div
@@ -152,7 +173,7 @@ export default function QuickAdd({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="快速記帳"
+        aria-label={spec.title}
         onClick={(e) => e.stopPropagation()}
         className="max-h-[94vh] w-full max-w-sm overflow-y-auto rounded-t-card border-2 border-ink bg-paper p-4 sm:rounded-card"
         style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
@@ -212,6 +233,17 @@ export default function QuickAdd({
           </button>
         </div>
 
+        {/* 資產與收入的名稱是識別用的,固定顯示而不是收在「更多」後面 */}
+        {namedEntity && (
+          <input
+            type="text"
+            placeholder={kind === "asset" ? "資產名稱(例如:台銀活存)" : "收入名稱(例如:本薪)"}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className={`${textInput} mb-2`}
+          />
+        )}
+
         {/* 地區(決定幣別) */}
         <div className="flex flex-wrap gap-1.5 pb-2">
           {REGIONS.map((r) => (
@@ -221,46 +253,58 @@ export default function QuickAdd({
           ))}
         </div>
 
-        {/* 日期與備註 */}
+        {/* 花費的日期 / 收入的頻率 / 共用的備註 */}
         <div className="flex flex-wrap gap-1.5 pb-3">
-          <button onClick={() => { setDate(today); setShowDate(false); }} className={chip(date === today && !showDate)}>
-            今天
-          </button>
-          <button onClick={() => { setDate(yesterday); setShowDate(false); }} className={chip(date === yesterday && !showDate)}>
-            昨天
-          </button>
-          <button onClick={() => setShowDate(true)} className={chip(showDate)}>
-            選日期
-          </button>
+          {kind === "expense" && (
+            <>
+              <button onClick={() => { setDate(today); setShowDate(false); }} className={chip(date === today && !showDate)}>
+                今天
+              </button>
+              <button onClick={() => { setDate(yesterday); setShowDate(false); }} className={chip(date === yesterday && !showDate)}>
+                昨天
+              </button>
+              <button onClick={() => setShowDate(true)} className={chip(showDate)}>
+                選日期
+              </button>
+            </>
+          )}
+          {kind === "income" &&
+            FREQUENCIES.map((f) => (
+              <button key={f.value} onClick={() => setFrequency(f.value)} className={chip(frequency === f.value)}>
+                {f.label}
+              </button>
+            ))}
           <button onClick={() => setShowMore((v) => !v)} className={chip(showMore)}>
             ＋備註
           </button>
         </div>
 
-        {showDate && (
+        {showDate && kind === "expense" && (
           <input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="mb-3 w-full rounded-mid border-2 border-ink bg-card px-3 py-2 text-sm"
+            className={`${textInput} mb-3`}
           />
         )}
 
         {showMore && (
           <div className="mb-3 space-y-2">
-            <input
-              type="text"
-              placeholder={`名稱(留空為「${cats.label("expense", category)}」)`}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-mid border-2 border-ink bg-card px-3 py-2 text-sm"
-            />
+            {!namedEntity && (
+              <input
+                type="text"
+                placeholder={`名稱(留空為「${cats.label(kind, category)}」)`}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className={textInput}
+              />
+            )}
             <input
               type="text"
               placeholder="備註"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className="w-full rounded-mid border-2 border-ink bg-card px-3 py-2 text-sm"
+              className={textInput}
             />
           </div>
         )}
@@ -302,7 +346,7 @@ export default function QuickAdd({
 
       {addingCategory && (
         <CategoryManager
-          initialKind="expense"
+          initialKind={kind}
           autoAdd
           onCreated={(c) => setCategory(c.key)}
           onClose={() => setAddingCategory(false)}

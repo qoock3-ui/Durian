@@ -4,7 +4,7 @@ import { useStore } from "../store";
 import { Bubble, Card, EmptyState, MonthNav, PrimaryButton, RegionBadge, RegionTabs, RowActions, Toast } from "../components/ui";
 import FormModal from "../components/FormModal";
 import CategoryManager from "../components/CategoryManager";
-import QuickAdd from "../components/QuickAdd";
+import QuickEntry from "../components/QuickEntry";
 import { expenseFields } from "../components/entityForms";
 import { type Expense, type Region } from "../lib/constants";
 import { currentMonthKey, expensesInMonth, fmt, fmtTWD, toTWD, totalExpenseTWD } from "../lib/finance";
@@ -181,7 +181,7 @@ export default function Expenses() {
         ))
       )}
 
-      {adding && <QuickAdd onClose={() => setAdding(false)} onSaved={setToast} />}
+      {adding && <QuickEntry kind="expense" onClose={() => setAdding(false)} onSaved={setToast} />}
 
       {editing && (
         <FormModal
