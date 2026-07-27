@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { del, post, put } from "../api";
+import { del, put } from "../api";
 import { useStore } from "../store";
-import { Bubble, Card, EmptyState, PrimaryButton, RegionBadge, RegionTabs, RowActions } from "../components/ui";
+import { Bubble, Card, EmptyState, PrimaryButton, RegionBadge, RegionTabs, RowActions, Toast } from "../components/ui";
 import FormModal from "../components/FormModal";
+import QuickEntry from "../components/QuickEntry";
 import CategoryManager from "../components/CategoryManager";
 import { incomeFields } from "../components/entityForms";
 import { FREQUENCY_LABEL, REGION_FLAG, type Income, type Region } from "../lib/constants";
@@ -11,7 +12,10 @@ import { fmt, fmtTWD, monthlyAmount, toTWD, totalMonthlyIncomeTWD } from "../lib
 export default function Incomes() {
   const { incomes, rates, refresh, cats } = useStore();
   const [tab, setTab] = useState<Region | "ALL">("ALL");
-  const [editing, setEditing] = useState<Income | "new" | null>(null);
+  // 新增走計算機面板,編輯走完整表單
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Income | null>(null);
+  const [toast, setToast] = useState("");
   const [addingCategory, setAddingCategory] = useState(false);
   const [patch, setPatch] = useState<Record<string, string> | undefined>();
 
@@ -27,8 +31,8 @@ export default function Incomes() {
   }));
 
   const save = async (values: Record<string, unknown>) => {
-    if (editing === "new") await post("/api/incomes", values);
-    else if (editing) await put(`/api/incomes/${editing.id}`, values);
+    if (!editing) return;
+    await put(`/api/incomes/${editing.id}`, values);
     await refresh("incomes");
   };
 
@@ -42,7 +46,7 @@ export default function Incomes() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-round text-2xl font-bold">收入</h1>
-        <PrimaryButton onClick={() => setEditing("new")}>＋ 新增收入</PrimaryButton>
+        <PrimaryButton onClick={() => setAdding(true)}>＋ 新增收入</PrimaryButton>
       </div>
 
       <Card tint="bg-p-mint">
@@ -67,7 +71,7 @@ export default function Incomes() {
         <Card>
           <EmptyState
             text={tab === "ALL" ? "尚無收入資料" : "這個地區還沒有收入"}
-            action={<PrimaryButton onClick={() => setEditing("new")}>新增第一筆收入</PrimaryButton>}
+            action={<PrimaryButton onClick={() => setAdding(true)}>新增第一筆收入</PrimaryButton>}
           />
         </Card>
       ) : (
@@ -117,15 +121,13 @@ export default function Incomes() {
         })
       )}
 
+      {adding && <QuickEntry kind="income" onClose={() => setAdding(false)} onSaved={setToast} />}
+
       {editing && (
         <FormModal
-          title={editing === "new" ? "新增收入" : "編輯收入"}
+          title="編輯收入"
           fields={incomeFields(cats, () => setAddingCategory(true))}
-          initial={
-            editing === "new"
-              ? { currency: "TWD", region: "TW", frequency: "monthly", type: cats.list("income")[0]?.key ?? "" }
-              : editing
-          }
+          initial={editing}
           patch={patch}
           onSubmit={save}
           onClose={() => {
@@ -143,6 +145,8 @@ export default function Incomes() {
           onClose={() => setAddingCategory(false)}
         />
       )}
+
+      {toast && <Toast text={toast} onDone={() => setToast("")} />}
     </div>
   );
 }
