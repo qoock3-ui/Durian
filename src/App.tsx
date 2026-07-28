@@ -6,6 +6,7 @@ import Overview from "./pages/Overview";
 import Assets from "./pages/Assets";
 import Incomes from "./pages/Incomes";
 import Expenses from "./pages/Expenses";
+import Invoices from "./pages/Invoices";
 import Trends from "./pages/Trends";
 import { useStore } from "./store";
 import { getToken } from "./api";
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/assets" element={<Assets />} />
         <Route path="/incomes" element={<Incomes />} />
         <Route path="/expenses" element={<Expenses />} />
+        <Route path="/invoices" element={<Invoices />} />
         <Route path="/trends" element={<Trends />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

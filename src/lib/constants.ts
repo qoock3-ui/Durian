@@ -1,3 +1,5 @@
+import type { PrizeTier } from "../../shared/invoice";
+
 export const CURRENCIES = ["TWD", "VND", "USD", "EUR", "JPY", "GBP", "HKD", "SGD", "AUD", "CAD", "KRW"] as const;
 export type Currency = (typeof CURRENCIES)[number];
 
@@ -86,5 +88,26 @@ export type Expense = {
   id: number; name: string; category: string; region: Region;
   amount: number; currency: Currency; date: string; note: string | null;
 };
+/**
+ * 掃 QR Code 存下來的發票。expense_id 指向自動記下的那筆花費。
+ * prize_tier 為 null 代表還沒對獎(該期未開獎,或中獎號碼還沒抓到)。
+ */
+export type Invoice = {
+  id: number;
+  inv_num: string;
+  inv_date: string;
+  period: string;
+  random_code: string;
+  total_amount: number;
+  seller_ban: string;
+  seller_name: string | null;
+  /** JSON 字串,[{ name, qty, price }] */
+  items: string | null;
+  expense_id: number | null;
+  prize_tier: PrizeTier | null;
+  prize_amount: number | null;
+  checked_at: string | null;
+};
+
 export type Rates = { rates: Record<string, number>; updated_at: string | null };
 export type User = { id: number; email: string; name: string; is_admin?: boolean };

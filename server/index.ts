@@ -3,6 +3,7 @@ import type { AppContext, Env } from "./env";
 import { authRoutes, computeIsAdmin, requireAuth } from "./auth";
 import { categoryRoutes } from "./categories";
 import { crudRoutes } from "./crud";
+import { invoiceRoutes, runInvoiceJobs } from "./invoices";
 import { ratesRoutes, refreshRates } from "./rates";
 
 const app = new Hono<AppContext>();
@@ -24,6 +25,7 @@ app.route("/api/categories", categoryRoutes);
 app.route("/api/assets", crudRoutes("assets"));
 app.route("/api/incomes", crudRoutes("incomes"));
 app.route("/api/expenses", crudRoutes("expenses"));
+app.route("/api/invoices", invoiceRoutes);
 app.route("/api/rates", ratesRoutes);
 
 app.notFound((c) => c.json({ error: "not_found" }, 404));
@@ -32,5 +34,7 @@ export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(refreshRates(env));
+    // 中獎號碼更新、補對獎、寄中獎通知。內部自己判斷該不該真的去抓
+    ctx.waitUntil(runInvoiceJobs(env));
   },
 };

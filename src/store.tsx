@@ -1,15 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { get, getToken, setToken } from "./api";
 import { buildIndex, type CategoryIndex } from "./lib/categories";
-import type { Asset, Category, Expense, Income, Rates, User } from "./lib/constants";
+import type { Asset, Category, Expense, Income, Invoice, Rates, User } from "./lib/constants";
 
-type Table = "assets" | "incomes" | "expenses" | "categories";
+type Table = "assets" | "incomes" | "expenses" | "categories" | "invoices";
 
 type Store = {
   user: User | null;
   assets: Asset[];
   incomes: Income[];
   expenses: Expense[];
+  invoices: Invoice[];
   categories: Category[];
   /** 分類查詢輔助,畫面一律透過它取標籤與顏色 */
   cats: CategoryIndex;
@@ -27,6 +28,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [rates, setRates] = useState<Rates>({ rates: { TWD: 1 }, updated_at: null });
   const [loading, setLoading] = useState(!!getToken());
@@ -36,6 +38,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!table || table === "assets") setAssets(await get<Asset[]>("/api/assets"));
     if (!table || table === "incomes") setIncomes(await get<Income[]>("/api/incomes"));
     if (!table || table === "expenses") setExpenses(await get<Expense[]>("/api/expenses"));
+    if (!table || table === "invoices") setInvoices(await get<Invoice[]>("/api/invoices"));
     if (!table) setRates(await get<Rates>("/api/rates"));
   }, []);
 
@@ -68,6 +71,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setIncomes([]);
     setExpenses([]);
+    setInvoices([]);
     setCategories([]);
   }, []);
 
@@ -75,7 +79,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   return (
     <StoreContext.Provider
-      value={{ user, assets, incomes, expenses, categories, cats, rates, loading, refresh, login, logout }}
+      value={{ user, assets, incomes, expenses, invoices, categories, cats, rates, loading, refresh, login, logout }}
     >
       {children}
     </StoreContext.Provider>
