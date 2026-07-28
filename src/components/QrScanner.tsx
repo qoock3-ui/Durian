@@ -21,9 +21,31 @@ type Detected = { rawValue: string };
 type DetectorCtor = new (opts: { formats: string[] }) => {
   detect(source: CanvasImageSource): Promise<Detected[]>;
 };
+type DetectorStatic = DetectorCtor & { getSupportedFormats?: () => Promise<string[]> };
 
 /** Chromium 系原生解碼,比 jsQR 快也吃得下較糊的畫面。Safari 沒有 */
-const NativeDetector = (globalThis as { BarcodeDetector?: DetectorCtor }).BarcodeDetector;
+const NativeDetector = (globalThis as { BarcodeDetector?: DetectorStatic }).BarcodeDetector;
+
+/**
+ * 解碼前的縮圖上限。發票左碼約 57×57 個模組,一個模組留 2 像素就認得出來,
+ * 640px 的畫面裡條碼只要佔到四分之一寬就綽綽有餘;單張照片只有一次機會,
+ * 給到 1600px,拍遠一點也還讀得到。
+ *
+ * 這兩個數字直接決定峰值記憶體:getImageData 每次都會配一塊 w×h×4 的新陣列,
+ * 收不回去的話 iOS 會直接把分頁收掉。640×480 一格約 1.2MB,搭配下面的
+ * SCAN_INTERVAL 等於每秒約 5MB 的垃圾,是 GC 追得上的量。
+ */
+const MAX_VIDEO_EDGE = 640;
+const MAX_PHOTO_EDGE = 1600;
+
+/** 對著靜止的發票,一秒掃四次已經很夠用 */
+const SCAN_INTERVAL = 250;
+
+/**
+ * 連續掃這麼久還沒讀到東西就先把相機收起來。掃不到通常是對不準或光線不夠,
+ * 再掃下去也只是一直吃資源;停下來等使用者按一下,總比讓分頁被系統收掉好。
+ */
+const SCAN_TIMEOUT = 90_000;
 
 const isRight = (s: string) => s.trim().startsWith("**");
 
@@ -39,6 +61,7 @@ export default function QrScanner({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const detectorRef = useRef<InstanceType<DetectorCtor> | null>(null);
   const [left, setLeft] = useState<string | null>(null);
   const [right, setRight] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -46,10 +69,59 @@ export default function QrScanner({
   /** getUserMedia 有時既不成功也不拋錯就這樣掛著(LINE、IG 這類內嵌瀏覽器
    *  最常見),久了就主動把拍照那條路指出來,不要讓人乾等 */
   const [slow, setSlow] = useState(false);
+  /** 解一張照片要一兩秒,沒有回饋會被當成當掉 */
+  const [decoding, setDecoding] = useState(false);
+  /** 加一就重開相機 */
+  const [camera, setCamera] = useState(0);
 
   // 掃描迴圈讀的是 ref,不然每次 setState 都要重啟整個相機
   const leftRef = useRef<string | null>(null);
   const rightRef = useRef<string | null>(null);
+  /** 手動關掉相機後要讓掃描迴圈也跟著停,不能只靠 effect 的 cleanup */
+  const offRef = useRef(false);
+
+  /**
+   * 原生解碼器只建一次,而且要先問過它認不認 qr_code——有些 Android 機型有
+   * BarcodeDetector 但沒有 QR 的後端,盲用會永遠回空陣列,掃再久也掃不到。
+   * 問不到或建不起來就維持 null,整條路退回 jsQR。
+   */
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!NativeDetector) return;
+      try {
+        const formats = (await NativeDetector.getSupportedFormats?.()) ?? ["qr_code"];
+        if (alive && formats.includes("qr_code")) {
+          detectorRef.current = new NativeDetector({ formats: ["qr_code"] });
+        }
+      } catch {
+        // 用不了就算了,jsQR 本來就是保底那條
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /**
+   * 關掉相機並釋放。系統相機一叫出來,這個分頁就退到背景,而持有 MediaStream
+   * 的背景分頁正是 iOS 最先回收的對象——回來時整個 App 已經重載,看起來就像
+   * 閃退。所以拍照前先主動放手。
+   */
+  const stopCamera = useCallback(() => {
+    offRef.current = true;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setReady(false);
+  }, []);
+
+  const restartCamera = () => {
+    offRef.current = false;
+    setError("");
+    setSlow(false);
+    setCamera((c) => c + 1);
+  };
 
   const accept = useCallback((raw: string) => {
     if (isRight(raw)) {
@@ -64,33 +136,75 @@ export default function QrScanner({
     return true;
   }, []);
 
-  /** 把一張畫面丟進解碼器,回傳讀到的字串 */
-  const decode = useCallback(async (source: HTMLVideoElement | HTMLImageElement, w: number, h: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !w || !h) return null;
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return null;
-    ctx.drawImage(source, 0, 0, w, h);
-
-    if (NativeDetector) {
-      try {
-        const found = await new NativeDetector({ formats: ["qr_code"] }).detect(canvas);
-        if (found.length) return found.map((f) => f.rawValue);
-      } catch {
-        // 原生解碼失敗就走 jsQR,不用讓使用者知道
-      }
+  /**
+   * 有原生解碼器就直接把來源交給它,連 canvas 都不要碰。
+   *
+   * 這裡原本是先畫進 canvas、交給原生解碼器,沒讀到再跑一次 jsQR。問題是
+   * 「還沒對準」的那幾十秒每一格都沒讀到,等於兩套解碼器全速輪流跑,外加
+   * 一次 canvas 讀回——Android 就是在這段時間被拖垮的。原生解碼器說沒有就
+   * 是沒有,不必再問 jsQR 一次。
+   */
+  const detectNative = useCallback(async (source: CanvasImageSource) => {
+    const detector = detectorRef.current;
+    if (!detector) return null;
+    try {
+      const found = await detector.detect(source);
+      return found.map((f) => f.rawValue);
+    } catch {
+      // 壞過一次就永久退回 jsQR,不要每格都再試一遍
+      detectorRef.current = null;
+      return null;
     }
-    const { data } = ctx.getImageData(0, 0, w, h);
-    const found = jsQR(data, w, h, { inversionAttempts: "dontInvert" });
-    return found?.data ? [found.data] : null;
   }, []);
+
+  /**
+   * jsQR 這條(Safari 走這裡)。解碼前一律先把畫面縮進上限:手機照片是
+   * 4032×3024,直接 getImageData 會一口氣要 48MB,iOS Safari 不報錯,
+   * 它直接把整個分頁收掉——使用者看到的就是「閃退」。
+   *
+   * 發票左碼約 57×57 個模組,一個模組留 2 個像素就夠認,所以即時畫面 640px、
+   * 照片 1600px 都還有餘裕。
+   */
+  const decodeJs = useCallback(
+    (source: CanvasImageSource, sw: number, sh: number, maxEdge: number, thorough = false) => {
+      const canvas = canvasRef.current;
+      if (!canvas || !sw || !sh) return null;
+      const scale = Math.min(1, maxEdge / Math.max(sw, sh));
+      const w = Math.round(sw * scale);
+      const h = Math.round(sh * scale);
+      // 尺寸沒變就別重設,設定 width/height 會把整塊 backing store 重配一次
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.drawImage(source, 0, 0, w, h);
+      const { data } = ctx.getImageData(0, 0, w, h);
+      // 逐格掃描要快,單張照片只有一次機會就掃仔細一點
+      const found = jsQR(data, w, h, {
+        inversionAttempts: thorough ? "attemptBoth" : "dontInvert",
+      });
+      return found?.data ? [found.data] : null;
+    },
+    [],
+  );
+
+  const decode = useCallback(
+    async (source: CanvasImageSource, sw: number, sh: number, maxEdge: number, thorough = false) => {
+      const native = await detectNative(source);
+      // 原生解碼器在線上就聽它的,空陣列代表這格真的沒有
+      if (native) return native.length ? native : null;
+      return decodeJs(source, sw, sh, maxEdge, thorough);
+    },
+    [detectNative, decodeJs],
+  );
 
   // 相機:掛載時開,卸載時務必關掉,否則 iOS 的相機指示燈會一直亮著
   useEffect(() => {
     let stop = false;
     let timer = 0;
+    offRef.current = false;
     const slowTimer = window.setTimeout(() => !stop && setSlow(true), 5000);
 
     (async () => {
@@ -115,15 +229,27 @@ export default function QrScanner({
         await video.play();
         setReady(true);
 
+        const startedAt = Date.now();
         const tick = async () => {
-          if (stop) return;
-          const v = videoRef.current;
-          if (v && v.readyState >= 2) {
-            const codes = await decode(v, v.videoWidth, v.videoHeight);
-            if (codes) for (const code of codes) accept(code);
+          if (stop || offRef.current) return;
+          try {
+            const v = videoRef.current;
+            if (v && v.readyState >= 2 && v.srcObject) {
+              const codes = await decode(v, v.videoWidth, v.videoHeight, MAX_VIDEO_EDGE);
+              if (codes) for (const code of codes) accept(code);
+            }
+          } catch {
+            // 單格解碼失敗不該讓整個迴圈死掉
+          }
+          if (!leftRef.current && Date.now() - startedAt > SCAN_TIMEOUT) {
+            stopCamera();
+            setError("掃了一陣子還是讀不到。讓條碼填滿取景框、或改用下方的拍照上傳試試");
+            return;
           }
           // 兩碼都到手就不用再燒電了
-          if (!stop && !(leftRef.current && rightRef.current)) timer = window.setTimeout(tick, 120);
+          if (!stop && !offRef.current && !(leftRef.current && rightRef.current)) {
+            timer = window.setTimeout(tick, SCAN_INTERVAL);
+          }
         };
         tick();
       } catch (e) {
@@ -142,26 +268,56 @@ export default function QrScanner({
       clearTimeout(slowTimer);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+      // 把 canvas 的 backing store 也還回去,不然它會活到 GC 心情好為止
+      const canvas = canvasRef.current;
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
     };
-  }, [accept, decode]);
+  }, [accept, decode, stopCamera, camera]);
 
   /** 相機不通時的退路:iOS 上 capture 會直接開系統相機 */
   const onPhoto = async (file: File | undefined) => {
     if (!file) return;
     setError("");
-    const url = URL.createObjectURL(file);
+    setDecoding(true);
+    // createImageBitmap 可以 close() 當場把那張 12MP 的點陣圖還回去,
+    // <img> 只能等 GC ——差別在峰值,而峰值就是 iOS 決定要不要收掉分頁的依據
+    let bitmap: ImageBitmap | null = null;
+    let img: HTMLImageElement | null = null;
+    let url = "";
     try {
-      const img = new Image();
-      img.src = url;
-      await img.decode();
-      const codes = await decode(img, img.naturalWidth, img.naturalHeight);
+      let source: CanvasImageSource;
+      let sw: number;
+      let sh: number;
+      if (typeof createImageBitmap === "function") {
+        bitmap = await createImageBitmap(file);
+        source = bitmap;
+        sw = bitmap.width;
+        sh = bitmap.height;
+      } else {
+        url = URL.createObjectURL(file);
+        img = new Image();
+        img.src = url;
+        await img.decode();
+        source = img;
+        sw = img.naturalWidth;
+        sh = img.naturalHeight;
+      }
+      // 縮到 1600 還讀不到就再退一階,遠拍的發票有時要縮小才對得上格線
+      let codes = await decode(source, sw, sh, MAX_PHOTO_EDGE, true);
+      if (!codes) codes = await decode(source, sw, sh, 900, true);
       if (!codes || !codes.some((c) => accept(c))) {
-        setError("這張照片裡讀不到 QR Code,對準一點再拍一次");
+        setError("這張照片裡讀不到 QR Code,靠近一點、讓條碼填滿畫面再拍一次");
       }
     } catch {
       setError("讀不到這張照片");
     } finally {
-      URL.revokeObjectURL(url);
+      bitmap?.close();
+      if (img) img.src = "";
+      if (url) URL.revokeObjectURL(url);
+      setDecoding(false);
     }
   };
 
@@ -197,10 +353,23 @@ export default function QrScanner({
         />
         {/* 取景框,讓人知道要把發票放中間 */}
         <div className="pointer-events-none absolute inset-6 rounded-mid border-2 border-dashed border-paper/70" />
-        {!ready && !error && (
-          <p className="absolute inset-0 grid place-items-center px-6 text-center text-sm text-paper">
-            {slow ? "相機遲遲開不起來,改用下面的「拍照上傳」比較快" : "開啟相機中…"}
-          </p>
+        {!ready && (
+          <div className="absolute inset-0 grid place-items-center px-6 text-center text-sm text-paper">
+            {decoding ? (
+              "辨識中…"
+            ) : offRef.current ? (
+              <button
+                onClick={restartCamera}
+                className="rounded-full border-2 border-paper px-4 py-2 text-sm font-medium"
+              >
+                重新開啟相機
+              </button>
+            ) : error ? null : slow ? (
+              "相機遲遲開不起來,改用下面的「拍照上傳」比較快"
+            ) : (
+              "開啟相機中…"
+            )}
+          </div>
         )}
       </div>
 
@@ -235,7 +404,13 @@ export default function QrScanner({
             accept="image/*"
             capture="environment"
             className="hidden"
-            onChange={(e) => onPhoto(e.target.files?.[0])}
+            // 系統相機開起來前先把 MediaStream 放掉,不然這個分頁很容易被 iOS 回收
+            onClick={stopCamera}
+            onChange={(e) => {
+              onPhoto(e.target.files?.[0]);
+              // 清掉才能連拍同一個檔名兩次
+              e.target.value = "";
+            }}
           />
         </label>
         <PrimaryButton className="flex-1" onClick={submit} disabled={!left || busy}>
