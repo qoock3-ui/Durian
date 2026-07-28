@@ -11,6 +11,7 @@ const NAV = [
   { to: "/assets", label: "資產", icon: "💰" },
   { to: "/incomes", label: "收入", icon: "💵" },
   { to: "/expenses", label: "花費", icon: "🧾" },
+  { to: "/invoices", label: "發票", icon: "🎟️" },
   { to: "/trends", label: "趨勢", icon: "📈" },
 ];
 
