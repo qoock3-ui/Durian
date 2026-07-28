@@ -3,6 +3,7 @@ import { ApiError, del, post } from "../api";
 import { useStore } from "../store";
 import { Badge, Bubble, Card, EmptyState, GhostButton, ModalShell, PrimaryButton, Toast } from "../components/ui";
 import QrScanner from "../components/QrScanner";
+import ErrorBoundary from "../components/ErrorBoundary";
 import { PRIZE_LABEL, claimDeadline, drawDate, periodLabel } from "../../shared/invoice";
 import type { Invoice } from "../lib/constants";
 import { fmtTWD } from "../lib/finance";
@@ -222,7 +223,12 @@ export default function Invoices() {
         })
       )}
 
-      {scanning && <QrScanner onResult={onScan} onClose={() => setScanning(false)} busy={busy} />}
+      {/* 掃描器要碰相機與解碼器,是最容易出事的一塊,壞掉不該把整個 App 帶走 */}
+      {scanning && (
+        <ErrorBoundary label="掃描器" onClose={() => setScanning(false)}>
+          <QrScanner onResult={onScan} onClose={() => setScanning(false)} busy={busy} />
+        </ErrorBoundary>
+      )}
 
       {result && (
         <ScanResult
