@@ -101,8 +101,9 @@ Durian/
 | PUT/DELETE | `/api/{assets,incomes,expenses}/:id` | 編輯 / 刪除(限本人資料) |
 | GET | `/api/rates` | 匯率表 + 更新時間(超過 24h 未更新會現抓一次) |
 | POST | `/api/rates/refresh` | 手動刷新匯率 |
-| GET | `/api/invoices` | 已掃描的發票 + 對獎結果 |
-| POST | `/api/invoices/scan` | 送出 QR 原始字串,回傳解析結果(重複掃回 409) |
+| GET | `/api/invoices` | 已記錄的發票 + 對獎結果 |
+| POST | `/api/invoices` | 手動輸入(號碼、日期、金額必填;店名與品項只有這條路填得到) |
+| POST | `/api/invoices/scan` | 送出 QR 原始字串,回傳解析結果(重複回 409) |
 | DELETE | `/api/invoices/:id` | 刪除發票,連帶刪掉它產生的花費 |
 | GET | `/api/invoices/awards` | 目前手上有哪幾期中獎號碼 |
 | POST | `/api/invoices/awards/refresh` | 手動重抓號碼並補對獎 |
