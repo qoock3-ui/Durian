@@ -8,13 +8,16 @@ import { GhostButton, ModalShell, PrimaryButton } from "./ui";
  * 一張發票印了兩個 QR:左邊那個含發票號碼、日期與金額(記帳與對獎只需要
  * 它),右邊那個只是品項明細的續篇。所以左碼掃到就可以送出,右碼是加分。
  *
- * 這裡有兩條路,而且「拍照」是預設的那條:
+ * 兩條路,預設走即時掃描——對著發票就好,那是最順的:
  *
+ * - 即時掃描:連續解碼,快。代價是要一直握著相機、一直配置畫面緩衝區,
+ *   記憶體吃緊的機器有機會被系統收掉。
  * - 拍照:叫出系統相機拍一張,解一次就結束。不持有相機串流、沒有逐格迴圈,
- *   在 WebView、舊機、記憶體吃緊的手機上都還撐得住。
- * - 即時掃描:對著發票連續解碼,快得多,但它要一直握著相機、一直配置畫面
- *   緩衝區,是所有回報過的閃退唯一的共通點。所以改成使用者自己開,而且上
- *   一次開了之後沒有正常關掉(代表分頁被系統收掉),下次就自動退回拍照。
+ *   在 WebView、舊機、記憶體吃緊的手機上都還撐得住。隨時一鍵可切。
+ *
+ * 降級是「壞過才降」而不是一律降:即時掃描開始時寫個旗標,正常收尾就清掉。
+ * 下次開啟發現旗標還在,代表上一輪是被系統收掉的,那一次就從拍照開始。
+ * 只要有一輪正常結束,下次又回到即時掃描。
  */
 
 type Detected = { rawValue: string };
@@ -83,9 +86,14 @@ export default function QrScanner({
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const [decoding, setDecoding] = useState(false);
-  /** 上一輪即時掃描沒有正常收尾,這次就先不要自動開相機 */
+  /** 上一輪即時掃描沒有正常收尾,代表那次是被系統收掉的 */
   const [crashed] = useState(readFlag);
-  const [live, setLive] = useState(false);
+  /**
+   * 預設就對著掃——那是快的、也是大多數人想要的。只有上一次真的被收掉時
+   * 才退回拍照,而且只退這一次:只要有一輪正常收尾,旗標就清掉,下次又是
+   * 即時掃描。與其一律降級,不如壞過才降。
+   */
+  const [live, setLive] = useState(!crashed);
 
   const leftRef = useRef<string | null>(null);
   const rightRef = useRef<string | null>(null);
