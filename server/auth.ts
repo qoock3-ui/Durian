@@ -240,7 +240,7 @@ authRoutes.post("/forgot-password", async (c) => {
 });
 
 /** 呼叫者是不是管理者。前端的 is_admin 只用來決定要不要顯示,權限一律以這裡為準。 */
-async function isAdmin(c: { env: Env; get: (k: "userId") => number }): Promise<boolean> {
+export async function isAdmin(c: { env: Env; get: (k: "userId") => number }): Promise<boolean> {
   const row = await c.env.DB.prepare("SELECT email FROM users WHERE id = ?")
     .bind(c.get("userId"))
     .first<{ email: string }>();

@@ -209,13 +209,30 @@ function decodeEntities(s: string): string {
     .replace(/&amp;/g, "&");
 }
 
-/** 去掉 HTML 標籤,標籤位置補一個空白免得數字黏在一起 */
+/**
+ * 去掉 HTML 標籤,標籤位置補一個空白免得數字黏在一起。
+ *
+ * description 有時是跳脫過的 HTML、有時整段包在 CDATA 裡,兩種都會出現,
+ * 所以先把 CDATA 拆掉再解跳脫,一條路徑吃兩種格式。
+ */
 function toText(html: string): string {
-  return decodeEntities(html).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+  const raw = html.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+  return decodeEntities(raw).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 const EIGHT = /(?<!\d)\d{8}(?!\d)/g;
 const THREE = /(?<!\d)\d{3}(?!\d)/g;
+
+/**
+ * 去掉獎金金額再找號碼。
+ *
+ * 「增開六獎:200元」的 200 自己就是三位數,不先拿掉就會被當成中獎號碼,
+ * 於是每一期的尾數 200 都會被誤報中獎——這是寧可漏報也不能發生的錯。
+ * 八位數的區段照樣濾一次:金額寫成 12345678 元的機率很低,但濾掉不花什麼。
+ */
+function stripAmounts(text: string): string {
+  return text.replace(/[\d,]+\s*(?:萬|億)\s*元?|[\d,]+\s*元/g, " ");
+}
 
 /** 從關鍵字往後切到下一個關鍵字為止 */
 function segment(text: string, from: string, until: string[]): string {
@@ -227,7 +244,7 @@ function segment(text: string, from: string, until: string[]): string {
     const i = after.indexOf(u);
     if (i >= 0 && i < end) end = i;
   }
-  return after.slice(0, end);
+  return stripAmounts(after.slice(0, end));
 }
 
 /**
@@ -239,8 +256,8 @@ function segment(text: string, from: string, until: string[]): string {
  * 號碼卻會讓人以為自己沒中。
  */
 export function parseAwardsXml(xml: string): Award[] {
-  const awards: Award[] = [];
-  for (const block of xml.split(/<item[\s>]/i).slice(1)) {
+  const awards = new Map<string, Award>();
+  for (const block of xml.split(/<item[\s/>]/i).slice(1)) {
     const title = toText(/<title>([\s\S]*?)<\/title>/i.exec(block)?.[1] ?? "");
     const desc = toText(/<description>([\s\S]*?)<\/description>/i.exec(block)?.[1] ?? "");
 
@@ -259,29 +276,51 @@ export function parseAwardsXml(xml: string): Award[] {
     const extraSixth = segment(desc, "增開", []).match(THREE) ?? [];
 
     if (!special || !grand || first.length === 0) continue;
-    awards.push({ period, special, grand, first: [...first], extraSixth: [...extraSixth] });
+    // 同一期出現在兩個 item(改版重貼)時以先出現的為準,RSS 是新的排前面
+    if (awards.has(period)) continue;
+    awards.set(period, {
+      period,
+      special,
+      grand,
+      first: [...new Set(first)],
+      extraSixth: [...new Set(extraSixth)],
+    });
   }
-  return awards;
+  return [...awards.values()];
 }
 
-/** 抓一次中獎號碼並寫進 invoice_awards,回傳成功寫入的期數 */
-export async function refreshAwards(env: Env): Promise<number> {
+/**
+ * 抓一次中獎號碼並寫進 invoice_awards,回傳實際寫入的期別。
+ *
+ * 回期別而不是回筆數,是因為呼叫端要把「這次到底拿到哪幾期」記進 job_runs
+ * ——只知道「成功寫了 3 期」還是回答不了「那我那期呢」。
+ */
+export async function refreshAwards(env: Env): Promise<string[]> {
   const res = await fetch(AWARDS_URL);
   if (!res.ok) throw new Error(`中獎號碼來源回應 ${res.status}`);
   const awards = parseAwardsXml(await res.text());
-  if (awards.length === 0) throw new Error("中獎號碼解析不到任何一期");
+  if (awards.length === 0) throw new Error("中獎號碼解析不到任何一期,RSS 版面可能已經改了");
 
   await env.DB.batch(
     awards.map((a) =>
       env.DB.prepare(
-        "INSERT INTO invoice_awards (period, special, grand, first, extra_sixth, updated_at) " +
-          "VALUES (?, ?, ?, ?, ?, datetime('now')) " +
+        "INSERT INTO invoice_awards (period, special, grand, first, extra_sixth, source, updated_at) " +
+          "VALUES (?, ?, ?, ?, ?, 'rss', datetime('now')) " +
           "ON CONFLICT(period) DO UPDATE SET special = excluded.special, grand = excluded.grand, " +
-          "first = excluded.first, extra_sixth = excluded.extra_sixth, updated_at = excluded.updated_at",
+          "first = excluded.first, extra_sixth = excluded.extra_sixth, updated_at = excluded.updated_at " +
+          // 人工補的那期不讓 RSS 蓋回去:會需要人工補,就表示這支解析器對那期
+          // 是靠不住的,再抓一次也沒有比較可信。要改回自動抓就把那列刪掉。
+          "WHERE invoice_awards.source <> 'manual'",
       ).bind(a.period, a.special, a.grand, a.first.join(","), a.extraSixth.join(",")),
     ),
   );
-  return awards.length;
+  return awards.map((a) => a.period);
+}
+
+/** 下一期。112-11 的下一期跨年到 113-01 */
+export function nextPeriod(period: string): string {
+  const [y, m] = period.split("-").map(Number);
+  return m >= 11 ? `${y + 1}-01` : `${y}-${String(m + 2).padStart(2, "0")}`;
 }
 
 export function rowToAward(r: {

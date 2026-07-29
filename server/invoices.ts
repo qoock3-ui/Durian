@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import type { AppContext, Env } from "./env";
+import { isAdmin } from "./auth";
 import { categoryExists, ensureCategories } from "./categories";
-import { sendPrizeEmail } from "./email";
+import { sendNoPrizeEmail, sendPrizeEmail } from "./email";
 import {
   checkPrize, drawDate, mergeRightQr, parseInvoiceQr, periodOf,
   refreshAwards, rowToAward, type InvoiceItem,
@@ -162,56 +163,125 @@ export async function checkPendingInvoices(env: Env): Promise<number> {
   return results.length;
 }
 
-/** 中獎了才寄信,而且每張只寄一次(notified_at) */
-export async function notifyWinners(env: Env): Promise<number> {
-  const { results } = await env.DB.prepare(
-    "SELECT i.id, i.inv_num, i.prize_tier, i.prize_amount, i.period, u.email, u.name " +
+/**
+ * 一期對完就寄一封結果通知,中獎與否都寄。
+ *
+ * 舊版只在中獎時寄信,結果「這期沒中」與「這期根本沒對到」對使用者來說
+ * 都是收不到任何信,分不出來——而後者其實是我們壞掉了。所以改成以
+ * (使用者, 期別)為單位:那期的發票全部都有 prize_tier 了才寄,一次一封。
+ *
+ * 寄成功才寫 invoice_notices,Brevo 掛掉的話下一個小時會再試一次。
+ */
+export async function notifyResults(env: Env): Promise<number> {
+  const { results: groups } = await env.DB.prepare(
+    "SELECT i.user_id, i.period, u.email, u.name, COUNT(*) AS total, " +
+      "SUM(CASE WHEN i.prize_tier IS NULL THEN 1 ELSE 0 END) AS pending " +
       "FROM invoices i JOIN users u ON u.id = i.user_id " +
-      "WHERE i.prize_amount > 0 AND i.notified_at IS NULL ORDER BY u.email",
-  ).all<{
-    id: number; inv_num: string; prize_tier: string; prize_amount: number;
-    period: string; email: string; name: string;
-  }>();
-  if (results.length === 0) return 0;
+      "LEFT JOIN invoice_notices n ON n.user_id = i.user_id AND n.period = i.period " +
+      "WHERE n.user_id IS NULL GROUP BY i.user_id, i.period HAVING pending = 0",
+  ).all<{ user_id: number; period: string; email: string; name: string; total: number }>();
 
-  const byUser = new Map<string, typeof results>();
-  for (const r of results) {
-    const list = byUser.get(r.email);
-    if (list) list.push(r);
-    else byUser.set(r.email, [r]);
-  }
-
+  const today = new Date().toISOString().slice(0, 10);
   let sent = 0;
-  for (const [email, wins] of byUser) {
+  for (const g of groups) {
+    if (drawDate(g.period) > today) continue;
+
+    const { results: wins } = await env.DB.prepare(
+      "SELECT id, inv_num, prize_tier, prize_amount, period, notified_at FROM invoices " +
+        "WHERE user_id = ? AND period = ? AND prize_amount > 0",
+    )
+      .bind(g.user_id, g.period)
+      .all<{
+        id: number; inv_num: string; prize_tier: string; prize_amount: number;
+        period: string; notified_at: string | null;
+      }>();
+
+    // 舊版寄過的中獎信沒有 invoice_notices 可以認,只認得出 notified_at。
+    // 全部都寄過就補一列紀錄了事,不然改版當天會把同一封中獎信再寄一次。
+    if (wins.length > 0 && wins.every((w) => w.notified_at)) {
+      await markNoticed(env, g.user_id, g.period);
+      continue;
+    }
+
     try {
-      await sendPrizeEmail(env, email, wins[0].name, wins);
-      await env.DB.batch(
-        wins.map((w) =>
-          env.DB.prepare("UPDATE invoices SET notified_at = datetime('now') WHERE id = ?").bind(w.id),
-        ),
-      );
-      sent += wins.length;
+      if (wins.length > 0) {
+        await sendPrizeEmail(env, g.email, g.name, wins);
+        await env.DB.batch(
+          wins.map((w) =>
+            env.DB.prepare("UPDATE invoices SET notified_at = datetime('now') WHERE id = ?").bind(w.id),
+          ),
+        );
+      } else {
+        await sendNoPrizeEmail(env, g.email, g.name, g.period, g.total);
+      }
+      await markNoticed(env, g.user_id, g.period);
+      sent++;
     } catch {
-      // 寄失敗就留著 notified_at = NULL,下一次 Cron 會再試
+      // 寄失敗就不寫 invoice_notices,下一次 Cron 會再試同一期
     }
   }
   return sent;
 }
 
-/** Cron 的整套流程:更新號碼 → 補對獎 → 通知 */
-export async function runInvoiceJobs(env: Env): Promise<void> {
-  // 中獎號碼兩個月才換一次,沒必要每小時抓
-  const last = await env.DB.prepare("SELECT MAX(updated_at) AS at FROM invoice_awards").first<{ at: string | null }>();
-  const stale = !last?.at || Date.now() - Date.parse(last.at + "Z") > 6 * 3600 * 1000;
-  if (stale) {
-    try {
-      await refreshAwards(env);
-    } catch {
-      // 抓不到就沿用資料庫裡既有的號碼
-    }
+async function markNoticed(env: Env, userId: number, period: string): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO invoice_notices (user_id, period, sent_at) VALUES (?, ?, datetime('now')) " +
+      "ON CONFLICT(user_id, period) DO NOTHING",
+  )
+    .bind(userId, period)
+    .run();
+}
+
+/**
+ * 留下這次跑的結果。每個工作只留最後一次,寫失敗就算了——診斷資訊自己
+ * 把整個排程弄掛才是本末倒置。
+ */
+export async function recordRun(db: D1Database, name: string, ok: boolean, detail: string): Promise<void> {
+  try {
+    await db
+      .prepare(
+        "INSERT INTO job_runs (name, ran_at, ok, detail) VALUES (?, datetime('now'), ?, ?) " +
+          "ON CONFLICT(name) DO UPDATE SET ran_at = excluded.ran_at, ok = excluded.ok, detail = excluded.detail",
+      )
+      .bind(name, ok ? 1 : 0, detail.slice(0, 300))
+      .run();
+  } catch (e) {
+    console.log("recordRun failed:", name, e);
   }
-  await checkPendingInvoices(env);
-  await notifyWinners(env);
+}
+
+/** 成功時寫下拿到哪幾期,失敗時寫錯誤原文——兩者都是之後唯一查得到的線索 */
+function refreshDetail(periods: string[]): string {
+  return periods.length ? `寫入 ${periods.length} 期:${periods.join("、")}` : "沒有任何一期寫入";
+}
+
+/** Cron 的整套流程:更新號碼 → 補對獎 → 通知。每一段的結果都記進 job_runs */
+export async function runInvoiceJobs(env: Env): Promise<void> {
+  try {
+    // 中獎號碼兩個月才換一次,沒必要每小時抓
+    const last = await env.DB.prepare("SELECT MAX(updated_at) AS at FROM invoice_awards").first<{ at: string | null }>();
+    const stale = !last?.at || Date.now() - Date.parse(last.at + "Z") > 6 * 3600 * 1000;
+    if (stale) {
+      try {
+        const periods = await refreshAwards(env);
+        await recordRun(env.DB, "awards_refresh", true, refreshDetail(periods));
+      } catch (e) {
+        // 抓不到就沿用資料庫裡既有的號碼,但這次為什麼抓不到要留下來
+        await recordRun(env.DB, "awards_refresh", false, String(e));
+      }
+    }
+
+    try {
+      const checked = await checkPendingInvoices(env);
+      const sent = await notifyResults(env);
+      await recordRun(env.DB, "invoice_check", true, `補對 ${checked} 張,寄出 ${sent} 封`);
+    } catch (e) {
+      await recordRun(env.DB, "invoice_check", false, String(e));
+    }
+  } catch (e) {
+    // scheduled() 不看回傳值,拋出去只會變成沒人讀的 log
+    console.log("runInvoiceJobs failed:", e);
+  }
 }
 
 // ── 路由 ──────────────────────────────────────────────
@@ -323,28 +393,116 @@ invoiceRoutes.delete("/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-/** 目前手上有哪幾期的中獎號碼,順便讓人看得出對獎是不是真的有資料 */
+/**
+ * 對獎這件事目前的全貌:手上有哪幾期號碼、上次去抓的結果,以及 missing。
+ *
+ * missing 是這支 API 真正要回答的問題。使用者看到「等待對獎」時想知道的是
+ * 「為什麼」,而答案幾乎都是「你那期的號碼還沒進來」——只有拿他自己的發票
+ * 去比才講得出這句,所以 missing 一定要照呼叫者的發票算,不能回全站的。
+ */
 invoiceRoutes.get("/awards", async (c) => {
-  const { results } = await c.env.DB.prepare(
-    "SELECT period, special, grand, first, extra_sixth, updated_at FROM invoice_awards ORDER BY period DESC",
-  ).all<{ period: string; first: string; extra_sixth: string; updated_at: string }>();
   const today = new Date().toISOString().slice(0, 10);
-  return c.json(
-    results.map((r) => ({
+
+  const { results } = await c.env.DB.prepare(
+    "SELECT period, special, grand, first, extra_sixth, source, updated_at " +
+      "FROM invoice_awards ORDER BY period DESC",
+  ).all<{
+    period: string; special: string; grand: string; first: string;
+    extra_sixth: string; source: string; updated_at: string;
+  }>();
+
+  const run = await c.env.DB.prepare("SELECT ran_at, ok, detail FROM job_runs WHERE name = 'awards_refresh'")
+    .first<{ ran_at: string; ok: number; detail: string | null }>();
+
+  const { results: gaps } = await c.env.DB.prepare(
+    "SELECT DISTINCT i.period FROM invoices i " +
+      "LEFT JOIN invoice_awards a ON a.period = i.period " +
+      "WHERE i.user_id = ? AND a.period IS NULL ORDER BY i.period DESC",
+  )
+    .bind(c.get("userId"))
+    .all<{ period: string }>();
+
+  return c.json({
+    awards: results.map((r) => ({
       ...r,
       first: r.first.split(",").filter(Boolean),
       extra_sixth: r.extra_sixth.split(",").filter(Boolean),
       drawn: drawDate(r.period) <= today,
     })),
-  );
+    lastFetch: run ? { at: run.ran_at, ok: run.ok === 1, detail: run.detail ?? "" } : null,
+    // 還沒開獎的期別本來就沒有號碼,那不叫缺
+    missing: gaps.map((g) => g.period).filter((p) => drawDate(p) <= today),
+  });
 });
 
+/** 手動重抓。失敗時把原始錯誤一起回去——「抓不到」這三個字誰都修不了 */
 invoiceRoutes.post("/awards/refresh", async (c) => {
   try {
     const periods = await refreshAwards(c.env);
+    const detail = refreshDetail(periods);
+    await recordRun(c.env.DB, "awards_refresh", true, detail);
     const checked = await checkPendingInvoices(c.env);
-    return c.json({ periods, checked });
+    return c.json({ periods: periods.length, checked, detail });
   } catch (e) {
-    return c.json({ error: String(e) }, 502);
+    const detail = String(e);
+    await recordRun(c.env.DB, "awards_refresh", false, detail);
+    return c.json({ error: "財政部的中獎號碼抓不到", detail: detail.slice(0, 300) }, 502);
   }
+});
+
+/** 號碼字串可以是陣列,也可以是使用者從公告複製下來的一串,逗號頓號空白都算分隔 */
+function numberList(v: unknown): string[] {
+  const raw = Array.isArray(v) ? v.map((x) => String(x)) : typeof v === "string" ? v.split(/[,、\s]+/) : [];
+  return raw.map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * 管理者手動補一期中獎號碼。
+ *
+ * RSS 解析壞掉、或財政部把舊期別從 RSS 拿掉時,這是唯一能讓使用者今天就
+ * 對到獎的路。存進去的 source='manual',之後自動抓不會蓋掉。
+ */
+invoiceRoutes.put("/awards/:period", async (c) => {
+  if (!(await isAdmin(c))) return c.json({ error: "forbidden" }, 403);
+
+  const period = c.req.param("period").trim();
+  if (!/^\d{4}-\d{2}$/.test(period) || Number(period.slice(5)) % 2 !== 1) {
+    return c.json({ error: "期別格式須為 YYYY-MM 且月份為單數月,例如 2026-03" }, 400);
+  }
+
+  const b = await c.req.json<Record<string, unknown>>();
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const special = str(b.special);
+  const grand = str(b.grand);
+  if (!/^\d{8}$/.test(special)) return c.json({ error: "特別獎必須是 8 位數字" }, 400);
+  if (!/^\d{8}$/.test(grand)) return c.json({ error: "特獎必須是 8 位數字" }, 400);
+
+  const first = numberList(b.first);
+  if (first.length < 1 || first.length > 10) {
+    return c.json({ error: "頭獎要 1 到 10 組號碼" }, 400);
+  }
+  if (!first.every((n) => /^\d{8}$/.test(n))) {
+    return c.json({ error: "頭獎每一組都必須是 8 位數字" }, 400);
+  }
+
+  const extraSixth = numberList(b.extra_sixth);
+  if (extraSixth.length > 5) return c.json({ error: "增開六獎最多 5 組號碼" }, 400);
+  if (!extraSixth.every((n) => /^\d{3}$/.test(n))) {
+    return c.json({ error: "增開六獎每一組都必須是 3 位數字" }, 400);
+  }
+
+  await c.env.DB.prepare(
+    "INSERT INTO invoice_awards (period, special, grand, first, extra_sixth, source, updated_at) " +
+      "VALUES (?, ?, ?, ?, ?, 'manual', datetime('now')) " +
+      "ON CONFLICT(period) DO UPDATE SET special = excluded.special, grand = excluded.grand, " +
+      "first = excluded.first, extra_sixth = excluded.extra_sixth, source = 'manual', " +
+      "updated_at = excluded.updated_at",
+  )
+    .bind(period, special, grand, first.join(","), extraSixth.join(","))
+    .run();
+
+  // 不動 job_runs:那格記的是「上次去財政部抓的結果」,手動補進來的號碼
+  // 寫進去只會讓人以為抓成功了。這一期的來源看 awards[].source 就知道。
+  const checked = await checkPendingInvoices(c.env);
+  return c.json({ checked });
 });

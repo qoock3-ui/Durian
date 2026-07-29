@@ -75,7 +75,9 @@ Durian/
 - `expenses(id, user_id, name, category, region, amount, currency, date, note, …)`
 - `exchange_rates(currency PK, rate_to_twd, updated_at)` — Cron 每小時整點更新
 - `invoices(id, user_id, inv_num, inv_date, period, random_code, total_amount, seller_ban, items, expense_id, prize_tier, prize_amount, …)` — 掃進來的發票,`(user_id, inv_num)` 唯一
-- `invoice_awards(period PK, special, grand, first, extra_sixth, updated_at)` — 財政部公布的中獎號碼,全站共用
+- `invoice_awards(period PK, special, grand, first, extra_sixth, source, updated_at)` — 財政部公布的中獎號碼,全站共用。`source='manual'` 是管理者手動補的,自動抓不會蓋掉
+- `job_runs(name PK, ran_at, ok, detail)` — 每個排程工作最後一次跑的結果。抓號碼失敗時,原因只留在這裡
+- `invoice_notices(user_id, period, PK 兩者)` — 那一期的對獎結果通知已經寄過了,用來避免重複寄
 
 枚舉一律存**英文代碼**(如 `cash_tw`、`stock_us`、`monthly`),中文標籤只存在前端 `constants.ts`,避免日後改文案要動資料庫。
 
@@ -105,8 +107,9 @@ Durian/
 | POST | `/api/invoices` | 手動輸入(號碼、日期、金額必填;店名與品項只有這條路填得到) |
 | POST | `/api/invoices/scan` | 送出 QR 原始字串,回傳解析結果(重複回 409) |
 | DELETE | `/api/invoices/:id` | 刪除發票,連帶刪掉它產生的花費 |
-| GET | `/api/invoices/awards` | 目前手上有哪幾期中獎號碼 |
-| POST | `/api/invoices/awards/refresh` | 手動重抓號碼並補對獎 |
+| GET | `/api/invoices/awards` | 手上有哪幾期中獎號碼、上次去抓的結果,以及 `missing`(呼叫者有發票、已開獎、卻還沒拿到號碼的期別) |
+| POST | `/api/invoices/awards/refresh` | 手動重抓號碼並補對獎。失敗回 502,`detail` 帶原始錯誤 |
+| PUT | `/api/invoices/awards/:period` | 管理者照公告手動輸入某一期的中獎號碼,存完立刻補對獎 |
 
 ### 發票記帳為什麼是掃 QR 而不是綁載具
 
@@ -122,7 +125,12 @@ Durian/
   同樣免申請。解析不到完整的一期就整期跳過:少一期只是晚點對獎,寫進半套號碼
   卻會讓人誤以為自己沒中。
 - 中獎通知走 Email(Brevo)。iOS 的網頁推播要求 16.4 以上且必須先加到主畫面,
-  Email 則是不管哪支手機都收得到。
+  Email 則是不管哪支手機都收得到。通知以(使用者, 期別)為單位,那期的發票全部
+  對完才寄,而且**沒中獎也寄一封**——只在中獎時寄的話,「這期沒中」跟「我們根本
+  沒對到」在收件匣裡長得一模一樣,而後者是故障。
+- RSS 這條來源會壞:版面改過、或舊期別被下架,都會讓整期發票卡在「等待對獎」。
+  所以每次抓的結果都寫進 `job_runs`,前端看得到失敗原因;真的抓不到時,管理者
+  可以照公告手動把號碼打進去,不必等來源修好。
 
 ## 6. 商業邏輯落點
 
