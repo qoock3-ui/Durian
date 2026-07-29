@@ -53,6 +53,25 @@ export const incomeFields = (cats: CategoryIndex, onAddCategory?: () => void): F
   noteField,
 ];
 
+/**
+ * 手動輸入發票。必填只有對獎與記帳真正需要的那三項:號碼、日期、金額。
+ * 店名與品項是 QR Code 裡沒有的東西,只有手動這條路填得進來,所以擺在前面。
+ */
+export const invoiceFields = (cats: CategoryIndex, onAddCategory?: () => void): Field[] => [
+  { name: "inv_num", label: "發票號碼(如 AB12345678)", type: "text", required: true },
+  { name: "inv_date", label: "開立日期", type: "date", required: true },
+  { name: "total_amount", label: "金額(含稅)", type: "number", required: true },
+  { name: "seller_name", label: "店名", type: "text" },
+  { name: "items", label: "購買品項(用逗號或換行分隔)", type: "textarea" },
+  {
+    name: "category", label: "分類(留空就依品項自動判斷)", type: "select",
+    onAdd: onAddCategory,
+    addLabel: "＋ 新增分類",
+    options: cats.list("expense").map((c) => ({ value: c.key, label: `${c.icon} ${c.label}` })),
+  },
+  { name: "random_code", label: "隨機碼(4 碼,兌獎時櫃台會核對)", type: "text" },
+];
+
 export const expenseFields = (cats: CategoryIndex, onAddCategory?: () => void): Field[] => [
   { name: "name", label: "項目名稱", type: "text", required: true },
   {

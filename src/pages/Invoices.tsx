@@ -3,6 +3,10 @@ import { ApiError, del, post } from "../api";
 import { useStore } from "../store";
 import { Badge, Bubble, Card, EmptyState, GhostButton, ModalShell, PrimaryButton, Toast } from "../components/ui";
 import QrScanner from "../components/QrScanner";
+import ErrorBoundary from "../components/ErrorBoundary";
+import FormModal from "../components/FormModal";
+import CategoryManager from "../components/CategoryManager";
+import { invoiceFields } from "../components/entityForms";
 import { PRIZE_LABEL, claimDeadline, drawDate, periodLabel } from "../../shared/invoice";
 import type { Invoice } from "../lib/constants";
 import { fmtTWD } from "../lib/finance";
@@ -42,9 +46,10 @@ function ScanResult({ invoice, onClose, onAgain }: { invoice: Invoice; onClose: 
   const status = statusOf(invoice, today);
   const names = itemNames(invoice);
   return (
-    <ModalShell title="掃到了" onClose={onClose}>
+    <ModalShell title="記好了" onClose={onClose}>
       <Card tint={status.won ? "bg-p-mint" : "bg-p-sky"}>
         <p className="tnum font-round text-3xl font-bold">{fmtTWD(invoice.total_amount)}</p>
+        {invoice.seller_name && <p className="mt-1 truncate text-sm font-medium">{invoice.seller_name}</p>}
         <p className="tnum mt-1 text-xs text-ink-2">
           {invoice.inv_num} · {invoice.inv_date}
         </p>
@@ -69,8 +74,11 @@ function ScanResult({ invoice, onClose, onAgain }: { invoice: Invoice; onClose: 
 }
 
 export default function Invoices() {
-  const { invoices, refresh } = useStore();
+  const { invoices, refresh, cats } = useStore();
   const [scanning, setScanning] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [patch, setPatch] = useState<Record<string, string> | undefined>();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Invoice | null>(null);
   const [toast, setToast] = useState("");
@@ -118,6 +126,14 @@ export default function Invoices() {
     [refresh],
   );
 
+  /** 手動輸入。錯誤訊息要浮上來,不然使用者不知道是號碼格式不對還是重複 */
+  const saveManual = async (values: Record<string, unknown>) => {
+    const r = await post<{ invoice: Invoice }>("/api/invoices", values);
+    await refresh("invoices");
+    await refresh("expenses");
+    setResult(r.invoice);
+  };
+
   const remove = async (inv: Invoice) => {
     if (!confirm(`刪除發票 ${inv.inv_num}?連同它記下的那筆花費一起刪除。`)) return;
     await del(`/api/invoices/${inv.id}`);
@@ -142,7 +158,10 @@ export default function Invoices() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-round text-2xl font-bold">發票</h1>
-        <PrimaryButton onClick={() => setScanning(true)}>＋ 掃發票</PrimaryButton>
+        <div className="flex gap-2">
+          <GhostButton onClick={() => setTyping(true)}>手動輸入</GhostButton>
+          <PrimaryButton onClick={() => setScanning(true)}>＋ 掃發票</PrimaryButton>
+        </div>
       </div>
 
       <Card tint="bg-p-sky">
@@ -165,8 +184,13 @@ export default function Invoices() {
       {invoices.length === 0 ? (
         <Card>
           <EmptyState
-            text="還沒掃過發票"
-            action={<PrimaryButton onClick={() => setScanning(true)}>掃第一張</PrimaryButton>}
+            text="還沒有發票"
+            action={
+              <div className="flex flex-wrap justify-center gap-2">
+                <PrimaryButton onClick={() => setScanning(true)}>掃第一張</PrimaryButton>
+                <GhostButton onClick={() => setTyping(true)}>手動輸入</GhostButton>
+              </div>
+            }
           />
         </Card>
       ) : (
@@ -193,9 +217,14 @@ export default function Invoices() {
                       <Bubble tint={status.won ? "bg-p-mint" : "bg-p-stone"} size="sm">
                         {status.won ? "🎉" : "🧾"}
                       </Bubble>
+                      {/* 有店名就用店名當標題,發票號碼退到副標——QR 給不了店名,
+                          手動輸入的才有,兩種都要好認 */}
                       <div className="min-w-0 flex-1">
-                        <div className="tnum truncate font-medium">{inv.inv_num}</div>
+                        <div className={`truncate font-medium ${inv.seller_name ? "" : "tnum"}`}>
+                          {inv.seller_name || inv.inv_num}
+                        </div>
                         <div className="truncate text-xs text-ink-3">
+                          {inv.seller_name ? `${inv.inv_num} · ` : ""}
                           {inv.inv_date}
                           {names ? ` · ${names}` : ""}
                         </div>
@@ -222,7 +251,35 @@ export default function Invoices() {
         })
       )}
 
-      {scanning && <QrScanner onResult={onScan} onClose={() => setScanning(false)} busy={busy} />}
+      {/* 掃描器要碰相機與解碼器,是最容易出事的一塊,壞掉不該把整個 App 帶走 */}
+      {scanning && (
+        <ErrorBoundary label="掃描器" onClose={() => setScanning(false)}>
+          <QrScanner onResult={onScan} onClose={() => setScanning(false)} busy={busy} />
+        </ErrorBoundary>
+      )}
+
+      {typing && (
+        <FormModal
+          title="手動輸入發票"
+          fields={invoiceFields(cats, () => setAddingCategory(true))}
+          initial={{ inv_date: new Date().toISOString().slice(0, 10) }}
+          patch={patch}
+          onSubmit={saveManual}
+          onClose={() => {
+            setTyping(false);
+            setPatch(undefined);
+          }}
+        />
+      )}
+
+      {addingCategory && (
+        <CategoryManager
+          initialKind="expense"
+          autoAdd
+          onCreated={(c) => setPatch({ category: c.key })}
+          onClose={() => setAddingCategory(false)}
+        />
+      )}
 
       {result && (
         <ScanResult

@@ -3,8 +3,8 @@ import type { AppContext, Env } from "./env";
 import { categoryExists, ensureCategories } from "./categories";
 import { sendPrizeEmail } from "./email";
 import {
-  checkPrize, drawDate, mergeRightQr, parseInvoiceQr,
-  refreshAwards, rowToAward, type InvoiceItem, type ParsedInvoice,
+  checkPrize, drawDate, mergeRightQr, parseInvoiceQr, periodOf,
+  refreshAwards, rowToAward, type InvoiceItem,
 } from "./einvoice";
 
 /**
@@ -33,12 +33,88 @@ function guessCategory(items: InvoiceItem[]): string {
   return "other";
 }
 
-/** QR 裡沒有店名,只能拿品項湊一個看得懂的名字 */
-function nameOf(parsed: ParsedInvoice): string {
-  const first = parsed.items[0]?.name?.trim();
-  if (!first) return `發票 ${parsed.invNum}`;
-  const extra = Math.max(parsed.items.length, parsed.totalItemCount) - 1;
+/**
+ * 這筆花費要叫什麼。店名最好認,但 QR 裡沒有——只有手動輸入時才拿得到,
+ * 所以其次用品項湊,再不然就掛發票號碼。
+ */
+function nameOf(inv: {
+  invNum: string;
+  sellerName?: string | null;
+  items: InvoiceItem[];
+  totalItemCount?: number;
+}): string {
+  const seller = inv.sellerName?.trim();
+  if (seller) return seller;
+  const first = inv.items[0]?.name?.trim();
+  if (!first) return `發票 ${inv.invNum}`;
+  const extra = Math.max(inv.items.length, inv.totalItemCount ?? 0) - 1;
   return extra > 0 ? `${first} 等 ${extra + 1} 項` : first;
+}
+
+type NewInvoice = {
+  invNum: string;
+  date: string;
+  period: string;
+  randomCode: string;
+  totalAmount: number;
+  sellerBan: string;
+  sellerName: string | null;
+  items: InvoiceItem[];
+  totalItemCount?: number;
+  /** 使用者自己挑的分類。沒給就從品名猜 */
+  category?: string;
+};
+
+/**
+ * 寫進資料庫的共用路徑:掃描與手動輸入最後都走這裡,才不會有兩套規則。
+ * 重複的發票回 409 而不是覆蓋——同一張掃第二次是誤觸,不是要改資料。
+ */
+async function insertInvoice(
+  db: D1Database,
+  userId: number,
+  inv: NewInvoice,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const dup = await db
+    .prepare(`SELECT ${INVOICE_COLS} FROM invoices WHERE user_id = ? AND inv_num = ?`)
+    .bind(userId, inv.invNum)
+    .first();
+  if (dup) return { status: 409, body: { error: "這張發票已經記過了", invoice: dup } };
+
+  // 分類是使用者自己的一份,猜出來(或指定)的 key 不一定在他的表裡
+  // (可能被封存或這個帳號還沒種過),補種一次再退回「其他」。
+  let category = inv.category?.trim() || guessCategory(inv.items);
+  if (!(await categoryExists(db, userId, "expense", category))) {
+    await ensureCategories(db, userId);
+    if (!(await categoryExists(db, userId, "expense", category))) category = "other";
+  }
+
+  const expense = await db
+    .prepare(
+      "INSERT INTO expenses (user_id, name, category, region, amount, currency, date, note) " +
+        "VALUES (?, ?, ?, 'TW', ?, 'TWD', ?, ?) RETURNING id",
+    )
+    .bind(userId, nameOf(inv), category, inv.totalAmount, inv.date, `發票 ${inv.invNum}`)
+    .first<{ id: number }>();
+
+  // 開過獎的期別就當場對,沒開獎的留白等 Cron
+  const award = (await loadAwards(db)).get(inv.period);
+  const prize = award ? checkPrize(inv.invNum, award) : null;
+
+  const invoice = await db
+    .prepare(
+      "INSERT INTO invoices (user_id, inv_num, inv_date, period, random_code, total_amount, " +
+        "seller_ban, seller_name, items, expense_id, prize_tier, prize_amount, checked_at) " +
+        `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${prize ? "datetime('now')" : "NULL"}) ` +
+        `RETURNING ${INVOICE_COLS}`,
+    )
+    .bind(
+      userId, inv.invNum, inv.date, inv.period, inv.randomCode, inv.totalAmount,
+      inv.sellerBan, inv.sellerName, JSON.stringify(inv.items), expense?.id ?? null,
+      prize?.tier ?? null, prize?.amount ?? null,
+    )
+    .first();
+
+  return { status: 201, body: { invoice } };
 }
 
 const INVOICE_COLS =
@@ -170,45 +246,62 @@ invoiceRoutes.post("/scan", async (c) => {
   }
   if (typeof body.right === "string") mergeRightQr(parsed, body.right);
 
-  const userId = c.get("userId");
-  const dup = await c.env.DB.prepare(`SELECT ${INVOICE_COLS} FROM invoices WHERE user_id = ? AND inv_num = ?`)
-    .bind(userId, parsed.invNum)
-    .first();
-  if (dup) return c.json({ error: "這張發票已經掃過了", invoice: dup }, 409);
+  const r = await insertInvoice(c.env.DB, c.get("userId"), {
+    ...parsed,
+    sellerName: null,
+  });
+  if (r.status !== 201) return c.json(r.body, 409);
+  return c.json({ ...r.body, needRightQr: parsed.totalItemCount > parsed.items.length }, 201);
+});
 
-  // 分類是使用者自己的一份,猜出來的 key 不一定在他的表裡(可能被封存或
-  // 這個帳號還沒種過),補種一次再退回「其他」。
-  let category = guessCategory(parsed.items);
-  if (!(await categoryExists(c.env.DB, userId, "expense", category))) {
-    await ensureCategories(c.env.DB, userId);
-    if (!(await categoryExists(c.env.DB, userId, "expense", category))) category = "other";
+/**
+ * 手動輸入。QR 破損、影印本、或單純不想開相機的時候用。
+ *
+ * 對獎只認發票號碼與日期,所以必填就這兩項加金額;店名與品項是 QR 給不了
+ * 的東西,反而只有這條路填得進來。隨機碼不影響對獎,但去櫃台兌獎時要核對,
+ * 有就存著。
+ */
+invoiceRoutes.post("/", async (c) => {
+  const b = await c.req.json<Record<string, unknown>>();
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+  const invNum = str(b.inv_num).toUpperCase().replace(/[\s-]/g, "");
+  if (!/^[A-Z]{2}\d{8}$/.test(invNum)) {
+    return c.json({ error: "發票號碼格式不對,應該是兩個英文字母加八位數字,例如 AB12345678" }, 400);
+  }
+  const date = str(b.inv_date);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) {
+    return c.json({ error: "開立日期格式須為 YYYY-MM-DD" }, 400);
+  }
+  const totalAmount = Number(b.total_amount);
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    return c.json({ error: "金額必須是大於 0 的數字" }, 400);
+  }
+  const randomCode = str(b.random_code);
+  if (randomCode && !/^\d{4}$/.test(randomCode)) {
+    return c.json({ error: "隨機碼是四位數字" }, 400);
   }
 
-  const expense = await c.env.DB.prepare(
-    "INSERT INTO expenses (user_id, name, category, region, amount, currency, date, note) " +
-      "VALUES (?, ?, ?, 'TW', ?, 'TWD', ?, ?) RETURNING id",
-  )
-    .bind(userId, nameOf(parsed), category, parsed.totalAmount, parsed.date, `發票 ${parsed.invNum}`)
-    .first<{ id: number }>();
+  // 品項用逗號、頓號或換行分隔,只收名稱——手動輸入還要一項項填數量單價太累了
+  const items: InvoiceItem[] = str(b.items)
+    .split(/[,、\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 30)
+    .map((name) => ({ name: name.slice(0, 60), qty: 0, price: 0 }));
 
-  // 開過獎的期別就當場對,沒開獎的留白等 Cron
-  const awards = await loadAwards(c.env.DB);
-  const award = awards.get(parsed.period);
-  const prize = award ? checkPrize(parsed.invNum, award) : null;
-
-  const invoice = await c.env.DB.prepare(
-    "INSERT INTO invoices (user_id, inv_num, inv_date, period, random_code, total_amount, " +
-      "seller_ban, items, expense_id, prize_tier, prize_amount, checked_at) " +
-      `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${prize ? "datetime('now')" : "NULL"}) RETURNING ${INVOICE_COLS}`,
-  )
-    .bind(
-      userId, parsed.invNum, parsed.date, parsed.period, parsed.randomCode, parsed.totalAmount,
-      parsed.sellerBan, JSON.stringify(parsed.items), expense?.id ?? null,
-      prize?.tier ?? null, prize?.amount ?? null,
-    )
-    .first();
-
-  return c.json({ invoice, needRightQr: parsed.totalItemCount > parsed.items.length }, 201);
+  const r = await insertInvoice(c.env.DB, c.get("userId"), {
+    invNum,
+    date,
+    period: periodOf(date),
+    randomCode,
+    totalAmount,
+    sellerBan: "",
+    sellerName: str(b.seller_name) || null,
+    items,
+    category: str(b.category),
+  });
+  return c.json(r.body, r.status as 201 | 409);
 });
 
 /** 刪發票時連帶刪掉它產生的那筆花費,不然帳上會留一筆孤兒 */
