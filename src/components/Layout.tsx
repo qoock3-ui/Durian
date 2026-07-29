@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import ChangePasswordModal from "./ChangePasswordModal";
 import CategoryManager from "./CategoryManager";
 import TempPasswordModal from "./TempPasswordModal";
+import DeleteAccountModal from "./DeleteAccountModal";
 import InstallPrompt from "./InstallPrompt";
 import Mascot from "./Mascot";
 
@@ -22,6 +23,7 @@ export default function Layout() {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const [showTempPassword, setShowTempPassword] = useState(false);
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-3 rounded-full border-2 px-3 py-2 text-sm font-medium transition ${
@@ -65,9 +67,14 @@ export default function Layout() {
             修改密碼
           </button>
           {user?.is_admin && (
-            <button onClick={() => setShowTempPassword(true)} className={`mt-2 ${smallButton}`}>
-              核發臨時密碼
-            </button>
+            <>
+              <button onClick={() => setShowTempPassword(true)} className={`mt-2 ${smallButton}`}>
+                核發臨時密碼
+              </button>
+              <button onClick={() => setShowDeleteAccount(true)} className={`mt-2 ${smallButton}`}>
+                刪除帳號
+              </button>
+            </>
           )}
           <button onClick={logout} className={`mt-2 ${smallButton}`}>
             登出
@@ -89,9 +96,14 @@ export default function Layout() {
             密碼
           </button>
           {user?.is_admin && (
-            <button onClick={() => setShowTempPassword(true)} className={chipButton}>
-              核發
-            </button>
+            <>
+              <button onClick={() => setShowTempPassword(true)} className={chipButton}>
+                核發
+              </button>
+              <button onClick={() => setShowDeleteAccount(true)} className={chipButton}>
+                刪除
+              </button>
+            </>
           )}
           <button onClick={logout} className={chipButton}>
             登出
@@ -141,6 +153,7 @@ export default function Layout() {
 
       {showCategories && <CategoryManager onClose={() => setShowCategories(false)} />}
       {showTempPassword && <TempPasswordModal onClose={() => setShowTempPassword(false)} />}
+      {showDeleteAccount && <DeleteAccountModal onClose={() => setShowDeleteAccount(false)} />}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
     </div>
   );
