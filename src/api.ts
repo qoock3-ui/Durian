@@ -10,9 +10,12 @@ export function setToken(token: string | null) {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** 後端附的原始錯誤文字。有的話比 message 更能說出到底是哪裡卡住 */
+  detail?: string;
+  constructor(status: number, message: string, detail?: string) {
     super(message);
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -21,13 +24,13 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(path, { ...options, headers });
-  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  const data = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith("/api/auth")) {
       setToken(null);
       location.reload();
     }
-    throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
+    throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`, data.detail);
   }
   return data as T;
 }

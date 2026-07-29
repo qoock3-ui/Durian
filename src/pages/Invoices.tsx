@@ -6,6 +6,7 @@ import QrScanner from "../components/QrScanner";
 import ErrorBoundary from "../components/ErrorBoundary";
 import FormModal from "../components/FormModal";
 import CategoryManager from "../components/CategoryManager";
+import { AwardStatus, useAwards } from "../components/Awards";
 import { invoiceFields } from "../components/entityForms";
 import { PRIZE_LABEL, claimDeadline, drawDate, periodLabel } from "../../shared/invoice";
 import type { Invoice } from "../lib/constants";
@@ -75,6 +76,7 @@ function ScanResult({ invoice, onClose, onAgain }: { invoice: Invoice; onClose: 
 
 export default function Invoices() {
   const { invoices, refresh, cats } = useStore();
+  const { awards, reloadAwards } = useAwards();
   const [scanning, setScanning] = useState(false);
   const [typing, setTyping] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
@@ -105,6 +107,9 @@ export default function Invoices() {
     }
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [invoices]);
+
+  /** 已開獎但號碼還沒到手的期別。這是「等待對獎」卡住的唯一原因,要講出來 */
+  const missing = useMemo(() => new Set(awards?.missing ?? []), [awards]);
 
   const onScan = useCallback(
     async (codes: ScanCodes) => {
@@ -146,12 +151,21 @@ export default function Invoices() {
     try {
       const r = await post<{ periods: number; checked: number }>("/api/invoices/awards/refresh", {});
       await refresh("invoices");
+      await reloadAwards();
       setToast(`已更新 ${r.periods} 期號碼,對了 ${r.checked} 張`);
-    } catch {
-      setToast("財政部的號碼抓不到,稍後再試");
+    } catch (e) {
+      // 抓不到的時候,真正的原因照原文丟出來。使用者才判斷得出是暫時的還是該找人
+      setToast(e instanceof ApiError ? e.detail || e.message : "財政部的號碼抓不到,稍後再試");
     } finally {
       setBusy(false);
     }
+  };
+
+  /** 管理者補完號碼後,發票與獎號兩邊都要重抓 */
+  const afterManualAward = async (checked: number) => {
+    await refresh("invoices");
+    await reloadAwards();
+    setToast(`已對 ${checked} 張`);
   };
 
   return (
@@ -170,15 +184,7 @@ export default function Invoices() {
         <p className="tnum mt-1 text-xs text-ink-2">
           共 {invoices.length} 張{stats.pending > 0 && ` · ${stats.pending} 張待對獎`}
         </p>
-        <div className="mt-2 border-t-2 border-dashed border-ink/15 pt-2">
-          <button
-            onClick={recheck}
-            disabled={busy}
-            className="rounded-full border-2 border-ink/20 px-3 py-1 text-xs text-ink-2 transition hover:border-ink hover:text-ink disabled:opacity-50"
-          >
-            {busy ? "更新中…" : "重新抓中獎號碼"}
-          </button>
-        </div>
+        <AwardStatus awards={awards} busy={busy} onRefresh={recheck} onManualSaved={afterManualAward} />
       </Card>
 
       {invoices.length === 0 ? (
@@ -208,6 +214,12 @@ export default function Invoices() {
                 </div>
                 <span className="tnum shrink-0 text-xs text-ink-3">{fmtTWD(sum)}</span>
               </div>
+              {/* 號碼還沒到手就講清楚,不然這幾張只會一直寫著「等待對獎」,看起來像壞了 */}
+              {drawn && missing.has(period) && (
+                <p className="mt-2 rounded-mid border-2 border-ink/15 bg-p-butter px-3 py-1.5 text-xs text-ink-2">
+                  已開獎,但還沒拿到這期的中獎號碼,所以底下這幾張還停在等待對獎。
+                </p>
+              )}
               <ul className="divide-y-2 divide-line-soft">
                 {items.map((inv) => {
                   const status = statusOf(inv, today);
