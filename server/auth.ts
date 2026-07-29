@@ -275,3 +275,68 @@ authRoutes.post("/admin/temp-password", requireAuth, async (c) => {
 
   return c.json({ email: user.email, name: user.name, tempPassword, expiresAt: resetExpires });
 });
+
+/**
+ * 管理者查一個帳號有多少資料,刪除前先看清楚要刪的是什麼。
+ * 查無此帳號時回 404,不洩漏「這個 Email 存不存在」以外的資訊。
+ */
+authRoutes.get("/admin/lookup-user", requireAuth, async (c) => {
+  if (!(await isAdmin(c))) return c.json({ error: "forbidden" }, 403);
+
+  const email = c.req.query("email")?.trim().toLowerCase() ?? "";
+  if (!email) return c.json({ error: "請輸入 Email" }, 400);
+
+  const user = await c.env.DB.prepare("SELECT id, email, name, created_at FROM users WHERE email = ?")
+    .bind(email)
+    .first<{ id: number; email: string; name: string; created_at: string }>();
+  if (!user) return c.json({ error: "查無此帳號" }, 404);
+
+  const counts = await c.env.DB.batch([
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE user_id = ?").bind(user.id),
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM incomes WHERE user_id = ?").bind(user.id),
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM expenses WHERE user_id = ?").bind(user.id),
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM invoices WHERE user_id = ?").bind(user.id),
+  ]);
+  const n = (i: number) => (counts[i].results[0] as { n: number }).n;
+
+  return c.json({
+    email: user.email,
+    name: user.name,
+    createdAt: user.created_at,
+    isAdmin: computeIsAdmin(c.env, user.email),
+    counts: { assets: n(0), incomes: n(1), expenses: n(2), invoices: n(3) },
+  });
+});
+
+/**
+ * 刪除一個帳號與它的全部資料。不可逆,所以要求前端先呼叫過
+ * lookup-user 讓管理者看過內容再送出——這裡不做二次確認,信任呼叫端。
+ *
+ * 現任管理者(ADMIN_EMAIL)不能刪自己:一旦刪掉,ADMIN_EMAIL 就變成一個
+ * 查無此人的帳號,誰都拿不回管理權限,得改環境變數才能救。
+ */
+authRoutes.delete("/admin/users/:email", requireAuth, async (c) => {
+  if (!(await isAdmin(c))) return c.json({ error: "forbidden" }, 403);
+
+  const email = decodeURIComponent(c.req.param("email")).trim().toLowerCase();
+  if (computeIsAdmin(c.env, email)) {
+    return c.json({ error: "不能刪除目前的管理者帳號" }, 400);
+  }
+
+  const user = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?")
+    .bind(email)
+    .first<{ id: number }>();
+  if (!user) return c.json({ error: "查無此帳號" }, 404);
+
+  // 先刪會參照 expenses 的 invoices,再刪四張主表,users 留到最後
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM invoices WHERE user_id = ?").bind(user.id),
+    c.env.DB.prepare("DELETE FROM assets WHERE user_id = ?").bind(user.id),
+    c.env.DB.prepare("DELETE FROM incomes WHERE user_id = ?").bind(user.id),
+    c.env.DB.prepare("DELETE FROM expenses WHERE user_id = ?").bind(user.id),
+    c.env.DB.prepare("DELETE FROM categories WHERE user_id = ?").bind(user.id),
+  ]);
+  await c.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(user.id).run();
+
+  return c.json({ ok: true });
+});
