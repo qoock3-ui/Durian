@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import ChangePasswordModal from "./ChangePasswordModal";
 import CategoryManager from "./CategoryManager";
 import TempPasswordModal from "./TempPasswordModal";
+import InstallPrompt from "./InstallPrompt";
 import Mascot from "./Mascot";
 
 const NAV = [
@@ -134,6 +135,9 @@ export default function Layout() {
           </NavLink>
         ))}
       </nav>
+
+      {/* 還沒安裝才會冒出來,而且進來幾秒後才顯示,不跟首屏搶注意力 */}
+      <InstallPrompt />
 
       {showCategories && <CategoryManager onClose={() => setShowCategories(false)} />}
       {showTempPassword && <TempPasswordModal onClose={() => setShowTempPassword(false)} />}
