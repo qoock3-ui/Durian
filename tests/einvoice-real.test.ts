@@ -58,11 +58,19 @@ describe("財政部 RSS 的真實回應", () => {
     }
   });
 
-  it("這份 RSS 不含增開六獎,所以那一欄是空的", () => {
-    // 只有官方公告有、RSS 沒有的情況。漏報 200 元不會害人,誤報才會,
-    // 所以維持空的;要補就走管理者手動輸入那條路。
+  it("增開六獎是空的,因為它已經停辦了", () => {
+    // 增開六獎自 111 年 1-2 月期起停辦,改為增開雲端發票專屬獎,所以 RSS 沒有
+    // 這一欄。空的是對的,不是漏抓。六獎(末三碼)不受影響,它是從頭獎推出來的。
     expect(awards).toHaveLength(6);
     for (const a of awards) expect(a.extraSixth).toEqual([]);
+  });
+
+  it("六獎是頭獎的末三碼,三組都要認", () => {
+    const a = award("2026-03");   // 頭獎 07225810、20231230、83518781
+    expect(checkPrize("AB11111810", a)).toEqual({ tier: "sixth", amount: 200 });
+    expect(checkPrize("AB22222230", a)).toEqual({ tier: "sixth", amount: 200 });
+    expect(checkPrize("AB33333781", a)).toEqual({ tier: "sixth", amount: 200 });
+    expect(checkPrize("AB44444999", a)).toEqual({ tier: "none", amount: 0 });
   });
 
   it("開獎日算出來的日期就是 RSS 自己的發布日", () => {
