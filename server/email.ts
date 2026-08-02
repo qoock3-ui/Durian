@@ -1,5 +1,5 @@
 import type { Env } from "./env";
-import { PRIZE_LABEL, claimDeadline, periodLabel, type PrizeTier } from "./einvoice";
+import { PRIZE_LABEL, claimDeadline, drawDate, nextPeriod, periodLabel, type PrizeTier } from "./einvoice";
 
 // 透過 Brevo(單一寄件人驗證,免網域)寄送交易信件。
 async function send(env: Env, toEmail: string, subject: string, textContent: string): Promise<void> {
@@ -59,5 +59,29 @@ export async function sendPrizeEmail(
       `${lines.join("\n")}\n\n` +
       `記得帶著中獎的發票正本與身分證件在領獎期限內兌領。\n\n` +
       `本結果由 FinTrack 依財政部公布的中獎號碼自動比對,實際中獎與否請以財政部公告及兌獎櫃台為準。\n\nFinTrack 團隊`,
+  );
+}
+
+/**
+ * 沒中獎也要寄的那一封。
+ *
+ * 只有中獎才寄的話,沒中獎跟「號碼還沒抓到、根本沒對」在使用者那邊長得
+ * 一模一樣,兩種都是收不到信。這封信的用途就是把這兩件事分開。
+ */
+export async function sendNoPrizeEmail(
+  env: Env,
+  toEmail: string,
+  name: string,
+  period: string,
+  count: number,
+): Promise<void> {
+  const next = nextPeriod(period);
+  await send(
+    env,
+    toEmail,
+    `FinTrack 對獎結果:${periodLabel(period)}`,
+    `${name} 您好,\n\n${periodLabel(period)}這期的 ${count} 張發票都對完了,這期沒有中獎。\n\n` +
+      `下一期是${periodLabel(next)},${drawDate(next)} 開獎,號碼一出來就會自動幫您對。\n\n` +
+      `FinTrack 團隊`,
   );
 }
