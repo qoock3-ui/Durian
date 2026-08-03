@@ -171,8 +171,13 @@ export async function checkPendingInvoices(env: Env): Promise<number> {
  * (使用者, 期別)為單位:那期的發票全部都有 prize_tier 了才寄,一次一封。
  *
  * 寄成功才寫 invoice_notices,Brevo 掛掉的話下一個小時會再試一次。
+ *
+ * 寄不出去的原因一定要帶回去。信寄不到跟「這期沒中」在使用者那邊又是同一
+ * 個樣子——收不到信——所以吞掉錯誤等於把剛修好的洞在隔壁再挖一個。
  */
-export async function notifyResults(env: Env): Promise<number> {
+export type NotifyOutcome = { sent: number; failed: number; error: string };
+
+export async function notifyResults(env: Env): Promise<NotifyOutcome> {
   const { results: groups } = await env.DB.prepare(
     "SELECT i.user_id, i.period, u.email, u.name, COUNT(*) AS total, " +
       "SUM(CASE WHEN i.prize_tier IS NULL THEN 1 ELSE 0 END) AS pending " +
@@ -183,6 +188,8 @@ export async function notifyResults(env: Env): Promise<number> {
 
   const today = new Date().toISOString().slice(0, 10);
   let sent = 0;
+  let failed = 0;
+  let error = "";
   for (const g of groups) {
     if (drawDate(g.period) > today) continue;
 
@@ -216,11 +223,24 @@ export async function notifyResults(env: Env): Promise<number> {
       }
       await markNoticed(env, g.user_id, g.period);
       sent++;
-    } catch {
-      // 寄失敗就不寫 invoice_notices,下一次 Cron 會再試同一期
+    } catch (e) {
+      // 寄失敗就不寫 invoice_notices,下一次 Cron 會再試同一期。
+      // 只留第一個原因:同一把金鑰壞掉時每期的錯都一樣,記十次沒有比較清楚。
+      failed++;
+      if (!error) error = String(e);
     }
   }
-  return sent;
+  return { sent, failed, error };
+}
+
+/** 這次寄信的結果寫進 job_runs,前端才問得到「信到底寄了沒」 */
+async function recordNotify(env: Env, n: NotifyOutcome): Promise<void> {
+  const detail = n.failed
+    ? `${n.failed} 封寄不出去${n.sent ? `(另外 ${n.sent} 封成功)` : ""}:${n.error}`
+    : n.sent
+      ? `寄出 ${n.sent} 封`
+      : "沒有需要寄的";
+  await recordRun(env.DB, "notify", n.failed === 0, detail);
 }
 
 async function markNoticed(env: Env, userId: number, period: string): Promise<void> {
@@ -273,8 +293,9 @@ export async function runInvoiceJobs(env: Env): Promise<void> {
 
     try {
       const checked = await checkPendingInvoices(env);
-      const sent = await notifyResults(env);
-      await recordRun(env.DB, "invoice_check", true, `補對 ${checked} 張,寄出 ${sent} 封`);
+      const n = await notifyResults(env);
+      await recordRun(env.DB, "invoice_check", true, `補對 ${checked} 張,寄出 ${n.sent} 封`);
+      await recordNotify(env, n);
     } catch (e) {
       await recordRun(env.DB, "invoice_check", false, String(e));
     }
@@ -414,6 +435,9 @@ invoiceRoutes.get("/awards", async (c) => {
   const run = await c.env.DB.prepare("SELECT ran_at, ok, detail FROM job_runs WHERE name = 'awards_refresh'")
     .first<{ ran_at: string; ok: number; detail: string | null }>();
 
+  const notify = await c.env.DB.prepare("SELECT ran_at, ok, detail FROM job_runs WHERE name = 'notify'")
+    .first<{ ran_at: string; ok: number; detail: string | null }>();
+
   const { results: gaps } = await c.env.DB.prepare(
     "SELECT DISTINCT i.period FROM invoices i " +
       "LEFT JOIN invoice_awards a ON a.period = i.period " +
@@ -430,6 +454,7 @@ invoiceRoutes.get("/awards", async (c) => {
       drawn: drawDate(r.period) <= today,
     })),
     lastFetch: run ? { at: run.ran_at, ok: run.ok === 1, detail: run.detail ?? "" } : null,
+    lastNotify: notify ? { at: notify.ran_at, ok: notify.ok === 1, detail: notify.detail ?? "" } : null,
     // 還沒開獎的期別本來就沒有號碼,那不叫缺
     missing: gaps.map((g) => g.period).filter((p) => drawDate(p) <= today),
   });
@@ -442,7 +467,11 @@ invoiceRoutes.post("/awards/refresh", async (c) => {
     const detail = refreshDetail(periods);
     await recordRun(c.env.DB, "awards_refresh", true, detail);
     const checked = await checkPendingInvoices(c.env);
-    return c.json({ periods: periods.length, checked, detail });
+    // 通知也一起跑。按這顆的人要的是「現在就把該做的做完」,只抓號碼不寄信
+    // 的話,信要等到下一個整點才會出去,而使用者只會以為通知壞了。
+    const n = await notifyResults(c.env);
+    await recordNotify(c.env, n);
+    return c.json({ periods: periods.length, checked, detail, sent: n.sent, mailError: n.error });
   } catch (e) {
     const detail = String(e);
     await recordRun(c.env.DB, "awards_refresh", false, detail);

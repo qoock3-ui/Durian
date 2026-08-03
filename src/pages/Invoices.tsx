@@ -149,10 +149,18 @@ export default function Invoices() {
   const recheck = async () => {
     setBusy(true);
     try {
-      const r = await post<{ periods: number; checked: number }>("/api/invoices/awards/refresh", {});
+      const r = await post<{ periods: number; checked: number; sent: number; mailError: string }>(
+        "/api/invoices/awards/refresh",
+        {},
+      );
       await refresh("invoices");
       await reloadAwards();
-      setToast(`已更新 ${r.periods} 期號碼,對了 ${r.checked} 張`);
+      // 寄信失敗不會讓這次呼叫變成錯誤(號碼還是抓到了),所以要自己講出來
+      setToast(
+        r.mailError
+          ? `已更新 ${r.periods} 期號碼,對了 ${r.checked} 張,但通知信寄不出去`
+          : `已更新 ${r.periods} 期號碼,對了 ${r.checked} 張,寄出 ${r.sent} 封通知`,
+      );
     } catch (e) {
       // 抓不到的時候,真正的原因照原文丟出來。使用者才判斷得出是暫時的還是該找人
       setToast(e instanceof ApiError ? e.detail || e.message : "財政部的號碼抓不到,稍後再試");

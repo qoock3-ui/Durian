@@ -28,6 +28,8 @@ export type AwardsState = {
   awards: Award[];
   /** 上一次去抓號碼的結果,從來沒抓過是 null */
   lastFetch: { at: string; ok: boolean; detail: string } | null;
+  /** 上一次寄對獎結果通知的結果。ok 為 false 時 detail 是寄不出去的原因 */
+  lastNotify: { at: string; ok: boolean; detail: string } | null;
   /** 使用者有發票、期別也開獎了,但號碼還沒到手的期別 */
   missing: string[];
 };
@@ -98,6 +100,7 @@ export function AwardStatus({
     [awards],
   );
   const last = awards?.lastFetch ?? null;
+  const notify = awards?.lastNotify ?? null;
 
   // 缺號碼的期別裡挑最新的當預設,那是使用者現在盯著看的那一期
   const defaultPeriod =
@@ -133,9 +136,11 @@ export function AwardStatus({
         )}
       </div>
 
-      {user?.email && (
-        <p className="mt-2 text-xs text-ink-3">
-          一期的發票全部對完後,結果會寄到 {user.email},沒中也會寄一次。
+      {/* 寄得出去的時候不必說什麼——信本身就是通知。只有寄不出去要講,
+          不然「這期沒中」跟「信根本沒寄成」在使用者那邊都是收不到信 */}
+      {notify && !notify.ok && (
+        <p className="mt-2 break-words text-xs text-danger">
+          對獎結果通知寄不出去({sinceLabel(notify.at)}):{notify.detail}
         </p>
       )}
 
