@@ -177,14 +177,23 @@ export async function checkPendingInvoices(env: Env): Promise<number> {
  */
 export type NotifyOutcome = { sent: number; failed: number; error: string };
 
-export async function notifyResults(env: Env): Promise<NotifyOutcome> {
-  const { results: groups } = await env.DB.prepare(
+/**
+ * onlyUserId 給定時只處理那一個人。Cron 要掃全站,但使用者自己按「重新對獎」
+ * 時不該替別人寄信——那會讓他看到的「寄出 N 封」裡混著別人的信。
+ */
+export async function notifyResults(env: Env, onlyUserId?: number): Promise<NotifyOutcome> {
+  const stmt = env.DB.prepare(
     "SELECT i.user_id, i.period, u.email, u.name, COUNT(*) AS total, " +
       "SUM(CASE WHEN i.prize_tier IS NULL THEN 1 ELSE 0 END) AS pending " +
       "FROM invoices i JOIN users u ON u.id = i.user_id " +
       "LEFT JOIN invoice_notices n ON n.user_id = i.user_id AND n.period = i.period " +
-      "WHERE n.user_id IS NULL GROUP BY i.user_id, i.period HAVING pending = 0",
-  ).all<{ user_id: number; period: string; email: string; name: string; total: number }>();
+      "WHERE n.user_id IS NULL" +
+      (onlyUserId === undefined ? "" : " AND i.user_id = ?") +
+      " GROUP BY i.user_id, i.period HAVING pending = 0",
+  );
+  const { results: groups } = await (onlyUserId === undefined ? stmt : stmt.bind(onlyUserId)).all<{
+    user_id: number; period: string; email: string; name: string; total: number;
+  }>();
 
   const today = new Date().toISOString().slice(0, 10);
   let sent = 0;
@@ -467,11 +476,26 @@ invoiceRoutes.post("/awards/refresh", async (c) => {
     const detail = refreshDetail(periods);
     await recordRun(c.env.DB, "awards_refresh", true, detail);
     const checked = await checkPendingInvoices(c.env);
+
     // 通知也一起跑。按這顆的人要的是「現在就把該做的做完」,只抓號碼不寄信
     // 的話,信要等到下一個整點才會出去,而使用者只會以為通知壞了。
-    const n = await notifyResults(c.env);
-    await recordNotify(c.env, n);
-    return c.json({ periods: periods.length, checked, detail, sent: n.sent, mailError: n.error });
+    //
+    // 但它要有自己的 try:寄信這段拋出去會被下面那個 catch 接走,於是號碼明明
+    // 抓到了卻回「財政部的號碼抓不到」,還把剛記成功的 awards_refresh 覆寫成
+    // 失敗。這支程式就是為了不再說這種謊才存在的。
+    let sent = 0;
+    let mailError = "";
+    try {
+      const n = await notifyResults(c.env, c.get("userId"));
+      await recordNotify(c.env, n);
+      sent = n.sent;
+      mailError = n.error;
+    } catch (e) {
+      mailError = String(e);
+      await recordRun(c.env.DB, "notify", false, mailError);
+    }
+
+    return c.json({ periods: periods.length, checked, detail, sent, mailError: mailError.slice(0, 300) });
   } catch (e) {
     const detail = String(e);
     await recordRun(c.env.DB, "awards_refresh", false, detail);
