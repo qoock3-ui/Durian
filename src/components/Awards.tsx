@@ -82,11 +82,14 @@ const chipClass =
 export function AwardStatus({
   awards,
   busy,
+  syncing,
   onRefresh,
   onManualSaved,
 }: {
   awards: AwardsState | null;
   busy: boolean;
+  /** 進場那次自動對獎還在跑 */
+  syncing?: boolean;
   onRefresh: () => void;
   /** 管理者補完號碼後,由發票頁去重抓發票與獎號 */
   onManualSaved: (checked: number) => void;
@@ -109,12 +112,14 @@ export function AwardStatus({
   return (
     <div className="mt-2 border-t-2 border-dashed border-ink/15 pt-2">
       <p className="text-xs text-ink-2">
-        {last === null
-          ? "還沒抓過中獎號碼"
-          : last.ok
-            ? `上次抓到中獎號碼:${sinceLabel(last.at)}`
-            : `上次去抓沒有成功:${sinceLabel(last.at)}`}
-        {drawnAwards.length > 0 && ` · 手上有 ${drawnAwards.length} 期`}
+        {syncing
+          ? "正在對獎…"
+          : last === null
+            ? "還沒抓過中獎號碼"
+            : last.ok
+              ? `上次抓到中獎號碼:${sinceLabel(last.at)}`
+              : `上次去抓沒有成功:${sinceLabel(last.at)}`}
+        {!syncing && drawnAwards.length > 0 && ` · 手上有 ${drawnAwards.length} 期`}
       </p>
 
       {/* 失敗原因照抄後端的話。講「稍後再試」等於什麼都沒講,使用者也就無從判斷要不要找人 */}

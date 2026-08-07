@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, del, post } from "../api";
 import { useStore } from "../store";
 import { Badge, Bubble, Card, EmptyState, GhostButton, ModalShell, PrimaryButton, Toast } from "../components/ui";
@@ -82,10 +82,36 @@ export default function Invoices() {
   const [addingCategory, setAddingCategory] = useState(false);
   const [patch, setPatch] = useState<Record<string, string> | undefined>();
   const [busy, setBusy] = useState(false);
+  /** 進場那次自動對獎還沒跑完。一開始就是 true,不然畫面會先閃一下舊狀態 */
+  const [syncing, setSyncing] = useState(true);
   const [result, setResult] = useState<Invoice | null>(null);
   const [toast, setToast] = useState("");
 
   const today = new Date().toISOString().slice(0, 10);
+
+  /**
+   * 進到這一頁就先對一次獎,不用等下一個整點的排程。
+   *
+   * 只跑一次:切走再切回來會重跑,但那一趟通常什麼都沒做(號碼還新、沒有待對
+   * 的發票),而且中獎號碼過不過期是後端在判斷的,前端不猜。
+   */
+  const synced = useRef(false);
+  useEffect(() => {
+    if (synced.current) return;
+    synced.current = true;
+    void (async () => {
+      try {
+        const r = await post<{ checked: number }>("/api/invoices/awards/sync", {});
+        // 有東西被對到才重抓發票,沒有的話這一趟對畫面沒有影響
+        if (r.checked > 0) await refresh("invoices");
+      } catch {
+        // 不跳錯誤打斷使用者:失敗原因已經寫進 job_runs,下面的狀態列會講
+      } finally {
+        await reloadAwards();
+        setSyncing(false);
+      }
+    })();
+  }, [refresh, reloadAwards]);
 
   const stats = useMemo(() => {
     let won = 0;
@@ -192,7 +218,13 @@ export default function Invoices() {
         <p className="tnum mt-1 text-xs text-ink-2">
           共 {invoices.length} 張{stats.pending > 0 && ` · ${stats.pending} 張待對獎`}
         </p>
-        <AwardStatus awards={awards} busy={busy} onRefresh={recheck} onManualSaved={afterManualAward} />
+        <AwardStatus
+          awards={awards}
+          busy={busy}
+          syncing={syncing}
+          onRefresh={recheck}
+          onManualSaved={afterManualAward}
+        />
       </Card>
 
       {invoices.length === 0 ? (

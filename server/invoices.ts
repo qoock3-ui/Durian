@@ -284,32 +284,83 @@ function refreshDetail(periods: string[]): string {
   return periods.length ? `寫入 ${periods.length} 期:${periods.join("、")}` : "沒有任何一期寫入";
 }
 
-/** Cron 的整套流程:更新號碼 → 補對獎 → 通知。每一段的結果都記進 job_runs */
+/** 中獎號碼兩個月才換一次,沒必要每次有人經過就去要一遍 */
+async function awardsAreStale(db: D1Database): Promise<boolean> {
+  const last = await db.prepare("SELECT MAX(updated_at) AS at FROM invoice_awards").first<{ at: string | null }>();
+  return !last?.at || Date.now() - Date.parse(last.at + "Z") > 6 * 3600 * 1000;
+}
+
+/**
+ * 通知包在自己的 try 裡。它拋出去會被外層接走,於是號碼明明抓到了、發票也對完
+ * 了,結果卻報成前一段失敗——這支程式就是為了不再說這種謊才存在的。
+ */
+async function notifyGuarded(env: Env, onlyUserId?: number): Promise<{ sent: number; mailError: string }> {
+  try {
+    const n = await notifyResults(env, onlyUserId);
+    await recordNotify(env, n);
+    return { sent: n.sent, mailError: n.error };
+  } catch (e) {
+    const mailError = String(e);
+    await recordRun(env.DB, "notify", false, mailError);
+    return { sent: 0, mailError };
+  }
+}
+
+export type AwardCycle = {
+  /** 這次有沒有真的去財政部要號碼。false 代表號碼還夠新,直接用庫裡的 */
+  fetched: boolean;
+  /** 這次要回來的期別。沒去要就是空的 */
+  periods: string[];
+  fetchError: string;
+  checked: number;
+  sent: number;
+  mailError: string;
+};
+
+/**
+ * 對獎的一輪:更新號碼 → 補對獎 → 通知。每一段的結果都記進 job_runs。
+ *
+ * Cron 與使用者進發票頁都走這裡,差別只有兩個參數,這樣兩條路不會慢慢長成
+ * 兩套規則。force 是「不管新不新都去要」(手動那顆按鈕),onlyUserId 是「只寄
+ * 這個人的信」——Cron 掃全站,但使用者自己觸發時不該替別人寄。
+ *
+ * 號碼抓不到不算整輪失敗:資料庫裡既有的號碼照樣拿來對,只是把原因記下來。
+ */
+export async function runAwardCycle(
+  env: Env,
+  opts: { force?: boolean; onlyUserId?: number } = {},
+): Promise<AwardCycle> {
+  const out: AwardCycle = { fetched: false, periods: [], fetchError: "", checked: 0, sent: 0, mailError: "" };
+
+  if (opts.force || (await awardsAreStale(env.DB))) {
+    try {
+      const periods = await refreshAwards(env);
+      await recordRun(env.DB, "awards_refresh", true, refreshDetail(periods));
+      out.fetched = true;
+      out.periods = periods;
+    } catch (e) {
+      out.fetchError = String(e);
+      await recordRun(env.DB, "awards_refresh", false, out.fetchError);
+    }
+  }
+
+  try {
+    out.checked = await checkPendingInvoices(env);
+    const n = await notifyGuarded(env, opts.onlyUserId);
+    out.sent = n.sent;
+    out.mailError = n.mailError;
+    await recordRun(env.DB, "invoice_check", true, `補對 ${out.checked} 張,寄出 ${n.sent} 封`);
+  } catch (e) {
+    await recordRun(env.DB, "invoice_check", false, String(e));
+  }
+  return out;
+}
+
+/** Cron 進來的那條路。掃全站,而且 scheduled() 不看回傳值,不能讓它拋 */
 export async function runInvoiceJobs(env: Env): Promise<void> {
   try {
-    // 中獎號碼兩個月才換一次,沒必要每小時抓
-    const last = await env.DB.prepare("SELECT MAX(updated_at) AS at FROM invoice_awards").first<{ at: string | null }>();
-    const stale = !last?.at || Date.now() - Date.parse(last.at + "Z") > 6 * 3600 * 1000;
-    if (stale) {
-      try {
-        const periods = await refreshAwards(env);
-        await recordRun(env.DB, "awards_refresh", true, refreshDetail(periods));
-      } catch (e) {
-        // 抓不到就沿用資料庫裡既有的號碼,但這次為什麼抓不到要留下來
-        await recordRun(env.DB, "awards_refresh", false, String(e));
-      }
-    }
-
-    try {
-      const checked = await checkPendingInvoices(env);
-      const n = await notifyResults(env);
-      await recordRun(env.DB, "invoice_check", true, `補對 ${checked} 張,寄出 ${n.sent} 封`);
-      await recordNotify(env, n);
-    } catch (e) {
-      await recordRun(env.DB, "invoice_check", false, String(e));
-    }
+    await runAwardCycle(env);
   } catch (e) {
-    // scheduled() 不看回傳值,拋出去只會變成沒人讀的 log
     console.log("runInvoiceJobs failed:", e);
   }
 }
@@ -469,33 +520,39 @@ invoiceRoutes.get("/awards", async (c) => {
   });
 });
 
+/**
+ * 打開發票頁時自動跑一輪。
+ *
+ * 使用者的認知是「點進來就會幫我對好」,所以不能只讀資料庫——只讀的話看到的
+ * 是上一次 Cron 留下的狀態,新掃的發票、剛開獎的期別都還沒動。
+ *
+ * 跟手動那顆的差別只在號碼:這裡只有在號碼過期(超過 6 小時)時才去財政部要,
+ * 所以進出頁面幾次不會一直打人家的站;補對獎與寄通知則每次都做,那兩件事只
+ * 碰自己的資料庫,而且沒事做的時候本來就是空跑。
+ */
+invoiceRoutes.post("/awards/sync", async (c) => {
+  const r = await runAwardCycle(c.env, { onlyUserId: c.get("userId") });
+  return c.json({
+    ...r,
+    fetchError: r.fetchError.slice(0, 300),
+    mailError: r.mailError.slice(0, 300),
+  });
+});
+
 /** 手動重抓。失敗時把原始錯誤一起回去——「抓不到」這三個字誰都修不了 */
 invoiceRoutes.post("/awards/refresh", async (c) => {
   try {
-    const periods = await refreshAwards(c.env);
-    const detail = refreshDetail(periods);
-    await recordRun(c.env.DB, "awards_refresh", true, detail);
-    const checked = await checkPendingInvoices(c.env);
-
-    // 通知也一起跑。按這顆的人要的是「現在就把該做的做完」,只抓號碼不寄信
-    // 的話,信要等到下一個整點才會出去,而使用者只會以為通知壞了。
-    //
-    // 但它要有自己的 try:寄信這段拋出去會被下面那個 catch 接走,於是號碼明明
-    // 抓到了卻回「財政部的號碼抓不到」,還把剛記成功的 awards_refresh 覆寫成
-    // 失敗。這支程式就是為了不再說這種謊才存在的。
-    let sent = 0;
-    let mailError = "";
-    try {
-      const n = await notifyResults(c.env, c.get("userId"));
-      await recordNotify(c.env, n);
-      sent = n.sent;
-      mailError = n.error;
-    } catch (e) {
-      mailError = String(e);
-      await recordRun(c.env.DB, "notify", false, mailError);
-    }
-
-    return c.json({ periods: periods.length, checked, detail, sent, mailError: mailError.slice(0, 300) });
+    // force:按這顆的人是明知道號碼可能沒過期、還是要再去要一次
+    const r = await runAwardCycle(c.env, { force: true, onlyUserId: c.get("userId") });
+    // 抓號碼失敗對這條路來說就是失敗——這顆按鈕的全部意義就是去抓
+    if (r.fetchError) throw new Error(r.fetchError);
+    return c.json({
+      periods: r.periods.length,
+      checked: r.checked,
+      detail: refreshDetail(r.periods),
+      sent: r.sent,
+      mailError: r.mailError.slice(0, 300),
+    });
   } catch (e) {
     const detail = String(e);
     await recordRun(c.env.DB, "awards_refresh", false, detail);
