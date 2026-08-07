@@ -28,6 +28,8 @@ export type AwardsState = {
   awards: Award[];
   /** 上一次去抓號碼的結果,從來沒抓過是 null */
   lastFetch: { at: string; ok: boolean; detail: string } | null;
+  /** 上一次寄對獎結果通知的結果。ok 為 false 時 detail 是寄不出去的原因 */
+  lastNotify: { at: string; ok: boolean; detail: string } | null;
   /** 使用者有發票、期別也開獎了,但號碼還沒到手的期別 */
   missing: string[];
 };
@@ -80,11 +82,14 @@ const chipClass =
 export function AwardStatus({
   awards,
   busy,
+  syncing,
   onRefresh,
   onManualSaved,
 }: {
   awards: AwardsState | null;
   busy: boolean;
+  /** 進場那次自動對獎還在跑 */
+  syncing?: boolean;
   onRefresh: () => void;
   /** 管理者補完號碼後,由發票頁去重抓發票與獎號 */
   onManualSaved: (checked: number) => void;
@@ -98,6 +103,7 @@ export function AwardStatus({
     [awards],
   );
   const last = awards?.lastFetch ?? null;
+  const notify = awards?.lastNotify ?? null;
 
   // 缺號碼的期別裡挑最新的當預設,那是使用者現在盯著看的那一期
   const defaultPeriod =
@@ -106,12 +112,14 @@ export function AwardStatus({
   return (
     <div className="mt-2 border-t-2 border-dashed border-ink/15 pt-2">
       <p className="text-xs text-ink-2">
-        {last === null
-          ? "還沒抓過中獎號碼"
-          : last.ok
-            ? `上次抓到中獎號碼:${sinceLabel(last.at)}`
-            : `上次去抓沒有成功:${sinceLabel(last.at)}`}
-        {drawnAwards.length > 0 && ` · 手上有 ${drawnAwards.length} 期`}
+        {syncing
+          ? "正在對獎…"
+          : last === null
+            ? "還沒抓過中獎號碼"
+            : last.ok
+              ? `上次抓到中獎號碼:${sinceLabel(last.at)}`
+              : `上次去抓沒有成功:${sinceLabel(last.at)}`}
+        {!syncing && drawnAwards.length > 0 && ` · 手上有 ${drawnAwards.length} 期`}
       </p>
 
       {/* 失敗原因照抄後端的話。講「稍後再試」等於什麼都沒講,使用者也就無從判斷要不要找人 */}
@@ -133,9 +141,11 @@ export function AwardStatus({
         )}
       </div>
 
-      {user?.email && (
-        <p className="mt-2 text-xs text-ink-3">
-          一期的發票全部對完後,結果會寄到 {user.email},沒中也會寄一次。
+      {/* 寄得出去的時候不必說什麼——信本身就是通知。只有寄不出去要講,
+          不然「這期沒中」跟「信根本沒寄成」在使用者那邊都是收不到信 */}
+      {notify && !notify.ok && (
+        <p className="mt-2 break-words text-xs text-danger">
+          對獎結果通知寄不出去({sinceLabel(notify.at)}):{notify.detail}
         </p>
       )}
 
