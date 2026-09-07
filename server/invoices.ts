@@ -171,18 +171,34 @@ export async function checkPendingInvoices(env: Env): Promise<number> {
  * (使用者, 期別)為單位:那期的發票全部都有 prize_tier 了才寄,一次一封。
  *
  * 寄成功才寫 invoice_notices,Brevo 掛掉的話下一個小時會再試一次。
+ *
+ * 寄不出去的原因一定要帶回去。信寄不到跟「這期沒中」在使用者那邊又是同一
+ * 個樣子——收不到信——所以吞掉錯誤等於把剛修好的洞在隔壁再挖一個。
  */
-export async function notifyResults(env: Env): Promise<number> {
-  const { results: groups } = await env.DB.prepare(
+export type NotifyOutcome = { sent: number; failed: number; error: string };
+
+/**
+ * onlyUserId 給定時只處理那一個人。Cron 要掃全站,但使用者自己按「重新對獎」
+ * 時不該替別人寄信——那會讓他看到的「寄出 N 封」裡混著別人的信。
+ */
+export async function notifyResults(env: Env, onlyUserId?: number): Promise<NotifyOutcome> {
+  const stmt = env.DB.prepare(
     "SELECT i.user_id, i.period, u.email, u.name, COUNT(*) AS total, " +
       "SUM(CASE WHEN i.prize_tier IS NULL THEN 1 ELSE 0 END) AS pending " +
       "FROM invoices i JOIN users u ON u.id = i.user_id " +
       "LEFT JOIN invoice_notices n ON n.user_id = i.user_id AND n.period = i.period " +
-      "WHERE n.user_id IS NULL GROUP BY i.user_id, i.period HAVING pending = 0",
-  ).all<{ user_id: number; period: string; email: string; name: string; total: number }>();
+      "WHERE n.user_id IS NULL" +
+      (onlyUserId === undefined ? "" : " AND i.user_id = ?") +
+      " GROUP BY i.user_id, i.period HAVING pending = 0",
+  );
+  const { results: groups } = await (onlyUserId === undefined ? stmt : stmt.bind(onlyUserId)).all<{
+    user_id: number; period: string; email: string; name: string; total: number;
+  }>();
 
   const today = new Date().toISOString().slice(0, 10);
   let sent = 0;
+  let failed = 0;
+  let error = "";
   for (const g of groups) {
     if (drawDate(g.period) > today) continue;
 
@@ -216,11 +232,24 @@ export async function notifyResults(env: Env): Promise<number> {
       }
       await markNoticed(env, g.user_id, g.period);
       sent++;
-    } catch {
-      // 寄失敗就不寫 invoice_notices,下一次 Cron 會再試同一期
+    } catch (e) {
+      // 寄失敗就不寫 invoice_notices,下一次 Cron 會再試同一期。
+      // 只留第一個原因:同一把金鑰壞掉時每期的錯都一樣,記十次沒有比較清楚。
+      failed++;
+      if (!error) error = String(e);
     }
   }
-  return sent;
+  return { sent, failed, error };
+}
+
+/** 這次寄信的結果寫進 job_runs,前端才問得到「信到底寄了沒」 */
+async function recordNotify(env: Env, n: NotifyOutcome): Promise<void> {
+  const detail = n.failed
+    ? `${n.failed} 封寄不出去${n.sent ? `(另外 ${n.sent} 封成功)` : ""}:${n.error}`
+    : n.sent
+      ? `寄出 ${n.sent} 封`
+      : "沒有需要寄的";
+  await recordRun(env.DB, "notify", n.failed === 0, detail);
 }
 
 async function markNoticed(env: Env, userId: number, period: string): Promise<void> {
@@ -255,31 +284,83 @@ function refreshDetail(periods: string[]): string {
   return periods.length ? `寫入 ${periods.length} 期:${periods.join("、")}` : "沒有任何一期寫入";
 }
 
-/** Cron 的整套流程:更新號碼 → 補對獎 → 通知。每一段的結果都記進 job_runs */
+/** 中獎號碼兩個月才換一次,沒必要每次有人經過就去要一遍 */
+async function awardsAreStale(db: D1Database): Promise<boolean> {
+  const last = await db.prepare("SELECT MAX(updated_at) AS at FROM invoice_awards").first<{ at: string | null }>();
+  return !last?.at || Date.now() - Date.parse(last.at + "Z") > 6 * 3600 * 1000;
+}
+
+/**
+ * 通知包在自己的 try 裡。它拋出去會被外層接走,於是號碼明明抓到了、發票也對完
+ * 了,結果卻報成前一段失敗——這支程式就是為了不再說這種謊才存在的。
+ */
+async function notifyGuarded(env: Env, onlyUserId?: number): Promise<{ sent: number; mailError: string }> {
+  try {
+    const n = await notifyResults(env, onlyUserId);
+    await recordNotify(env, n);
+    return { sent: n.sent, mailError: n.error };
+  } catch (e) {
+    const mailError = String(e);
+    await recordRun(env.DB, "notify", false, mailError);
+    return { sent: 0, mailError };
+  }
+}
+
+export type AwardCycle = {
+  /** 這次有沒有真的去財政部要號碼。false 代表號碼還夠新,直接用庫裡的 */
+  fetched: boolean;
+  /** 這次要回來的期別。沒去要就是空的 */
+  periods: string[];
+  fetchError: string;
+  checked: number;
+  sent: number;
+  mailError: string;
+};
+
+/**
+ * 對獎的一輪:更新號碼 → 補對獎 → 通知。每一段的結果都記進 job_runs。
+ *
+ * Cron 與使用者進發票頁都走這裡,差別只有兩個參數,這樣兩條路不會慢慢長成
+ * 兩套規則。force 是「不管新不新都去要」(手動那顆按鈕),onlyUserId 是「只寄
+ * 這個人的信」——Cron 掃全站,但使用者自己觸發時不該替別人寄。
+ *
+ * 號碼抓不到不算整輪失敗:資料庫裡既有的號碼照樣拿來對,只是把原因記下來。
+ */
+export async function runAwardCycle(
+  env: Env,
+  opts: { force?: boolean; onlyUserId?: number } = {},
+): Promise<AwardCycle> {
+  const out: AwardCycle = { fetched: false, periods: [], fetchError: "", checked: 0, sent: 0, mailError: "" };
+
+  if (opts.force || (await awardsAreStale(env.DB))) {
+    try {
+      const periods = await refreshAwards(env);
+      await recordRun(env.DB, "awards_refresh", true, refreshDetail(periods));
+      out.fetched = true;
+      out.periods = periods;
+    } catch (e) {
+      out.fetchError = String(e);
+      await recordRun(env.DB, "awards_refresh", false, out.fetchError);
+    }
+  }
+
+  try {
+    out.checked = await checkPendingInvoices(env);
+    const n = await notifyGuarded(env, opts.onlyUserId);
+    out.sent = n.sent;
+    out.mailError = n.mailError;
+    await recordRun(env.DB, "invoice_check", true, `補對 ${out.checked} 張,寄出 ${n.sent} 封`);
+  } catch (e) {
+    await recordRun(env.DB, "invoice_check", false, String(e));
+  }
+  return out;
+}
+
+/** Cron 進來的那條路。掃全站,而且 scheduled() 不看回傳值,不能讓它拋 */
 export async function runInvoiceJobs(env: Env): Promise<void> {
   try {
-    // 中獎號碼兩個月才換一次,沒必要每小時抓
-    const last = await env.DB.prepare("SELECT MAX(updated_at) AS at FROM invoice_awards").first<{ at: string | null }>();
-    const stale = !last?.at || Date.now() - Date.parse(last.at + "Z") > 6 * 3600 * 1000;
-    if (stale) {
-      try {
-        const periods = await refreshAwards(env);
-        await recordRun(env.DB, "awards_refresh", true, refreshDetail(periods));
-      } catch (e) {
-        // 抓不到就沿用資料庫裡既有的號碼,但這次為什麼抓不到要留下來
-        await recordRun(env.DB, "awards_refresh", false, String(e));
-      }
-    }
-
-    try {
-      const checked = await checkPendingInvoices(env);
-      const sent = await notifyResults(env);
-      await recordRun(env.DB, "invoice_check", true, `補對 ${checked} 張,寄出 ${sent} 封`);
-    } catch (e) {
-      await recordRun(env.DB, "invoice_check", false, String(e));
-    }
+    await runAwardCycle(env);
   } catch (e) {
-    // scheduled() 不看回傳值,拋出去只會變成沒人讀的 log
     console.log("runInvoiceJobs failed:", e);
   }
 }
@@ -414,6 +495,9 @@ invoiceRoutes.get("/awards", async (c) => {
   const run = await c.env.DB.prepare("SELECT ran_at, ok, detail FROM job_runs WHERE name = 'awards_refresh'")
     .first<{ ran_at: string; ok: number; detail: string | null }>();
 
+  const notify = await c.env.DB.prepare("SELECT ran_at, ok, detail FROM job_runs WHERE name = 'notify'")
+    .first<{ ran_at: string; ok: number; detail: string | null }>();
+
   const { results: gaps } = await c.env.DB.prepare(
     "SELECT DISTINCT i.period FROM invoices i " +
       "LEFT JOIN invoice_awards a ON a.period = i.period " +
@@ -430,19 +514,45 @@ invoiceRoutes.get("/awards", async (c) => {
       drawn: drawDate(r.period) <= today,
     })),
     lastFetch: run ? { at: run.ran_at, ok: run.ok === 1, detail: run.detail ?? "" } : null,
+    lastNotify: notify ? { at: notify.ran_at, ok: notify.ok === 1, detail: notify.detail ?? "" } : null,
     // 還沒開獎的期別本來就沒有號碼,那不叫缺
     missing: gaps.map((g) => g.period).filter((p) => drawDate(p) <= today),
+  });
+});
+
+/**
+ * 打開發票頁時自動跑一輪。
+ *
+ * 使用者的認知是「點進來就會幫我對好」,所以不能只讀資料庫——只讀的話看到的
+ * 是上一次 Cron 留下的狀態,新掃的發票、剛開獎的期別都還沒動。
+ *
+ * 跟手動那顆的差別只在號碼:這裡只有在號碼過期(超過 6 小時)時才去財政部要,
+ * 所以進出頁面幾次不會一直打人家的站;補對獎與寄通知則每次都做,那兩件事只
+ * 碰自己的資料庫,而且沒事做的時候本來就是空跑。
+ */
+invoiceRoutes.post("/awards/sync", async (c) => {
+  const r = await runAwardCycle(c.env, { onlyUserId: c.get("userId") });
+  return c.json({
+    ...r,
+    fetchError: r.fetchError.slice(0, 300),
+    mailError: r.mailError.slice(0, 300),
   });
 });
 
 /** 手動重抓。失敗時把原始錯誤一起回去——「抓不到」這三個字誰都修不了 */
 invoiceRoutes.post("/awards/refresh", async (c) => {
   try {
-    const periods = await refreshAwards(c.env);
-    const detail = refreshDetail(periods);
-    await recordRun(c.env.DB, "awards_refresh", true, detail);
-    const checked = await checkPendingInvoices(c.env);
-    return c.json({ periods: periods.length, checked, detail });
+    // force:按這顆的人是明知道號碼可能沒過期、還是要再去要一次
+    const r = await runAwardCycle(c.env, { force: true, onlyUserId: c.get("userId") });
+    // 抓號碼失敗對這條路來說就是失敗——這顆按鈕的全部意義就是去抓
+    if (r.fetchError) throw new Error(r.fetchError);
+    return c.json({
+      periods: r.periods.length,
+      checked: r.checked,
+      detail: refreshDetail(r.periods),
+      sent: r.sent,
+      mailError: r.mailError.slice(0, 300),
+    });
   } catch (e) {
     const detail = String(e);
     await recordRun(c.env.DB, "awards_refresh", false, detail);
